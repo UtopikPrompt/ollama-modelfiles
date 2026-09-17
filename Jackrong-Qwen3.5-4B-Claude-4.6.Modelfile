@@ -1,0 +1,3 @@
+FROM huggingface.co/Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-GGUF:Q5_K_M
+
+PARAMETER num_ctx 114688
