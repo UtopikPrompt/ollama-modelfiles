@@ -1,3 +1,0 @@
-FROM huggingface.co/openbmb/MiniCPM5-2B-GGUF:F16
-
-PARAMETER num_ctx 75000

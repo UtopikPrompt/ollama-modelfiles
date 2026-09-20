@@ -33,8 +33,16 @@ ollama run ornith-1.5:9b-64k
 
 | File Name | Base Model | Context Window | Purpose / Notes |
 | :--- | :--- | :--- | :--- |
-| `ornith-1.5-9b-64k.modelfile` | `ornith-1.5:9b` | **64,000 tokens** | Expanded context window for deep document analysis. |
-| *(Add next file)* | | | |
+| `ornith-1.5-9b-64k.modelfile` | `ornith-ai/Ornith-1.5-9B-GGUF` | **64,000 tokens** | Expanded context window for deep document analysis. |
+| `ornith-1.5-9b-32k.modelfile` | `ornith-ai/Ornith-1.5-9B-GGUF` | **32,000 tokens** | Compact context window for general-purpose use. |
+| `ornith-1.5-9b.modelfile` | `ornith-ai/Ornith-1.5-9B-GGUF` | **131,000 tokens** | Native GGUF format, maximum context. |
+| `minicpm5-2b-f16.modelfile` | `openbmb/MiniCPM5-2B-GGUF` | **75,000 tokens** | Full precision F16 quantization. |
+| `minicpm5-2b-q4k.modelfile` | `openbmb/MiniCPM5-2B-GGUF` | **75,000 tokens** | Q4_K_M quantization (balanced speed/quality). |
+| `neohorse-1-9b-q4k.modelfile` | `neohorse/neohorse-1-9b` | **131,000 tokens** | Q4_K_M quantization, 131k context. |
+| `jackrong-qwen3.5-4b.modelfile` | `jackrong/qwen3.5` | **65,000 tokens** | 4B parameter model with extended context. |
+| `unsloth-qwen3.5-4b.modelfile` | `unsloth/Qwen3.5-4B-GGUF` | **128,000 tokens** | Optimized GGUF version with 128k context. |
+| `gemma4-e4b-128k.modelfile` | `google/gemma2:94b` | **131,000 tokens** | Google Gemma 4, 94B parameters, 128k context. |
+| `ornith-1.5-9b.modelfile` | `ornith-1.5:9b` | **Native** | Raw GGUF format, no quantization. |
 
 ---
 

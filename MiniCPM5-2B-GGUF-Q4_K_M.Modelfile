@@ -1,3 +1,0 @@
-FROM huggingface.co/openbmb/MiniCPM5-2B-GGUF:Q4_K_M
-
-PARAMETER num_ctx 120500
