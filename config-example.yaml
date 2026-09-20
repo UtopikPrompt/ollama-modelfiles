@@ -1,0 +1,6 @@
+configurations:
+  - name: low-end-desktop
+    cpu: 4
+    ram: 8
+    gpu: 0
+    vram: 0
