@@ -65,4 +65,3 @@ If you modify a `.modelfile` in this repository, you must re-run the creation co
 # Re-build after making edits
 ollama create <model-tag-name> -f <filename>.modelfile
 ```
->>>>>>> master
