@@ -3,7 +3,62 @@ set -e
 
 # Configuration
 MODELS_DIR="models"
-DOWNLOADS_DIR="downloads"
+DOWNLOADS_DIR="models"
+
+# Default values for flags
+FORCE_DOWNLOAD=false
+NO_DOWNLOAD=false
+
+# Parse command line arguments
+while getopts "fnd" opt; do
+    case $opt in
+        f)
+            FORCE_DOWNLOAD=true
+            ;;
+        n)
+            NO_DOWNLOAD=true
+            ;;
+        d)
+            show_usage
+            exit 0
+            ;;
+        \?)
+            show_usage
+            exit 1
+            ;;
+    esac
+done
+
+show_usage() {
+    echo "Usage: $0 [OPTIONS] <model_url>"
+    echo "Options:"
+    echo "  -f, --force    Force download even if file exists"
+    echo "  -n, --no-download    Don't download any models"
+    echo "  -d, --help     Show this help message"
+}
+
+# Load default parameters from config file if available
+if [[ -f "config.bash" ]]; then
+    source config.bash
+fi
+
+# Function to check if a parameter is active (not commented out) in config.bash
+is_param_active() {
+    local param_name="$1"
+    [[ -f "config.bash" ]] || return 1
+    grep -q "^#${param_name}" config.bash && return 1
+    grep -q "^${param_name}=" config.bash && return 0
+    return 1
+}
+
+# Function to get value of a parameter from config.bash
+get_param_value() {
+    local param_name="$1"
+    [[ -f "config.bash" ]] || return 1
+    # Clean up bash style evaluation to grab the actual variable assignment 
+    # using indirect variable expansion ${!param_name} since config.bash was sourced
+    echo "${!param_name:-}"
+}
 
 # Download and create Modelfile for each model
 for model in "$@"; do
@@ -14,28 +69,42 @@ for model in "$@"; do
     mkdir -p "$DOWNLOADS_DIR"
     
     # Extract organization from URL (e.g., "unsloth" from "huggingface.co/unsloth/Qwen3.5-4B-GGUF/...")
-    organization=$(echo "$model" | awk -F/ '{print $(NF-4)}')
+    organization=$(echo "$model" | awk -F/ '{print $(NF-4)}' | tr -d '\n' | head -c 50)
     
     # Extract model name from URL (handle filenames with spaces)
-    model_name=$(echo "$model" | awk -F/ '{print $NF}' | sed 's/\.gguf$//')
+    model_name=$(echo "$model" | awk -F/ '{print $NF}' | sed 's/\.gguf$//' | tr -d '\n' | head -c 50)
     
     # Create organization subdirectory if it doesn't exist
     mkdir -p "$DOWNLOADS_DIR/$organization"
     
-    # Download the model first (from Hugging Face)
-    echo "  Downloading from Hugging Face: $(basename "$model" .gguf)"
-    curl -L "${model}" -o "$DOWNLOADS_DIR/${organization}/${model_name}.gguf"
+    # Check if file already exists
+    DOWNLOAD_FILE="$DOWNLOADS_DIR/${organization}/${model_name}.gguf"
+    if [[ -f "$DOWNLOAD_FILE" ]]; then
+        if [[ "$FORCE_DOWNLOAD" == "true" ]]; then
+            echo "  File exists, forcing download: $(basename "$model" .gguf)"
+            curl -L "${model}" -o "$DOWNLOAD_FILE"
+        else
+            echo "  File already exists: $DOWNLOAD_FILE. Skipping download."
+            if [[ "$NO_DOWNLOAD" != "true" ]]; then
+                echo "  Skipping download (use -f to force)"
+            fi
+        fi
+    else
+        echo "  Downloading from Hugging Face: $(basename "$model" .gguf)"
+        curl -L "${model}" -o "$DOWNLOAD_FILE"
+    fi
     
     # Create organization subdirectory in models/ if it doesn't exist
     mkdir -p "$MODELS_DIR/$organization"
 
-    # Create Modelfile in models/ directory
-    cat > "$MODELS_DIR/$organization/$model_name.Modelfile" << EOF
+    modelfile_path="$MODELS_DIR/$organization/$model_name.Modelfile"
+
+    # 1. Create the base template structure using a quoted Heredoc so nothing evaluates unexpectedly
+    cat > "$modelfile_path" << 'EOF'
 # 1. BASE MODEL (Required)
-FROM "$DOWNLOADS_DIR/${organization}/${model_name}.gguf"
+FROM ../../$DOWNLOADS_DIR/${organization}/${model_name}.gguf
 
 # 2. PROMPT & CONVERSATION TEMPLATE
-# Defines how system messages, prompt strings, and model outputs are structured.
 #TEMPLATE """
 #{{- if .System }}<|start_header_id|>system<|end_header_id|>
 #{{ .System }}<|eot_id|>
@@ -55,51 +124,52 @@ FROM "$DOWNLOADS_DIR/${organization}/${model_name}.gguf"
 # ==============================================================================
 # RUNTIME GENERATION PARAMETERS
 # ==============================================================================
-
-# --- Model Behavior & Sampling ---
-#PARAMETER temperature      0.8    # Creativity control (0.0 = strict/deterministic, 1.0+ = highly creative)
-#PARAMETER top_k            40     # Caps the generation pool to the top K most likely tokens
-#PARAMETER top_p            0.9    # Nucleus sampling threshold (filters out low-probability choices)
-#PARAMETER min_p            0.0    # Minimum probability threshold relative to the top token
-#PARAMETER seed             0      # Random number seed (set an integer > 0 for reproducible outputs)
-
-# --- Mirostat Perplexity Control (Alternative Sampling) ---
-#PARAMETER mirostat         0      # Enable Mirostat (0 = disabled, 1 = Mirostat 1.0, 2 = Mirostat 2.0)
-#PARAMETER mirostat_eta     0.1    # Learning rate/responsiveness adjustment for Mirostat
-#PARAMETER mirostat_tau     5.0    # Balancing parameter for text coherence vs diversity
-
-# --- Context & Token Limits ---
-#PARAMETER num_ctx          2048   # Maximum text history the model remembers (e.g., 4096, 8192)
-#PARAMETER num_predict      -1     # Max tokens to generate per response (-1 = infinite/until stop sequence)
-#PARAMETER draft_num_predict 4     # Speculative draft tokens to predict per step (if using draft models)
-
-# --- Penalties & Repetition ---
-#PARAMETER repeat_penalty   1.1    # How aggressively to block word and phrase repetition
-#PARAMETER repeat_last_n    64     # How far back (tokens) to scan for text duplication (0 = off, -1 = context)
-#PARAMETER presence_penalty 0.0    # Degree to penalize tokens that have already appeared in output
-#PARAMETER frequency_penalty 0.0   # Degree to penalize tokens based on cumulative usage frequency
-
-# --- Hardware & Performance Knobs ---
-#PARAMETER num_keep         4      # Amount of original prompt tokens to anchor if context shifts
-#PARAMETER num_thread       8      # CPU compute threads (Ollama auto-sets this by default; set explicitly if needed)
-#PARAMETER num_gpu          99     # Model layers to drop into VRAM (0 = CPU only, 99 = push everything to GPU)
-#PARAMETER main_gpu         0      # Sets target primary GPU ID when running a multi-GPU environment
-#PARAMETER numa             false  # Toggles Non-Uniform Memory Access balancing tweaks
-#PARAMETER low_vram         false  # Streamlines internal layers to fit strict resource ceilings
-#PARAMETER f16_kv           true   # Retains half-precision structures for Key/Value generation caches
-#PARAMETER vocab_only       false  # Instructs Ollama to only load dictionary structures (omits weight layers)
-#PARAMETER use_mmap         true   # Leverages file mapping memory strategies to speed up startup
-#PARAMETER use_mlock        false  # Permanently binds layers to active RAM allocations (avoids system disk swapping)
-#PARAMETER embedding_only   false  # Silences normal output workflows to only act as an embedding extractor
-
-# --- Stop Sequences ---
-## Declares exact sequences that immediately cut off further text generation.
-#PARAMETER stop "<|eot_id|>"
-#PARAMETER stop "User:"
-#PARAMETER stop "Assistant:"
 EOF
 
-    ollama create "$organization/$model_name" -f "$MODELS_DIR/$organization/$model_name.Modelfile"
+    # Fix the path string interpolation in the first line of the file since it was quoted
+    sed -i "s|\$DOWNLOADS_DIR|${DOWNLOADS_DIR}|g" "$modelfile_path"
+    sed -i "s|\${organization}|${organization}|g" "$modelfile_path"
+    sed -i "s|\${model_name}|${model_name}|g" "$modelfile_path"
 
-    echo "Created Modelfile: $MODELS_DIR/$organization/$model_name.Modelfile"
+    # 2. Dynamically execute Bash checks and append the values safely to the Modelfile
+    
+    echo -e "\n# --- Model Behavior & Sampling ---" >> "$modelfile_path"
+    is_param_active TEMPERATURE && echo "PARAMETER temperature      $(get_param_value TEMPERATURE)" >> "$modelfile_path"
+    is_param_active TOP_K       && echo "PARAMETER top_k            $(get_param_value TOP_K)" >> "$modelfile_path"
+    is_param_active TOP_P       && echo "PARAMETER top_p            $(get_param_value TOP_P)" >> "$modelfile_path"
+    is_param_active MIN_P       && echo "PARAMETER min_p            $(get_param_value MIN_P)" >> "$modelfile_path"
+    is_param_active SEED        && echo "PARAMETER seed             $(get_param_value SEED)" >> "$modelfile_path"
+
+    echo -e "\n# --- Mirostat Perplexity Control (Alternative Sampling) ---" >> "$modelfile_path"
+    is_param_active MIROSTAT     && echo "PARAMETER mirostat         $(get_param_value MIROSTAT)" >> "$modelfile_path"
+    is_param_active MIROSTAT_ETA && echo "PARAMETER mirostat_eta     $(get_param_value MIROSTAT_ETA)" >> "$modelfile_path"
+    is_param_active MIROSTAT_TAU && echo "PARAMETER mirostat_tau     $(get_param_value MIROSTAT_TAU)" >> "$modelfile_path"
+
+    echo -e "\n# --- Context & Token Limits ---" >> "$modelfile_path"
+    is_param_active NUM_CTX            && echo "PARAMETER num_ctx          $(get_param_value NUM_CTX)" >> "$modelfile_path"
+    is_param_active NUM_PREDICT        && echo "PARAMETER num_predict      $(get_param_value NUM_PREDICT)" >> "$modelfile_path"
+    is_param_active DRAFT_NUM_PREDICT  && echo "PARAMETER draft_num_predict $(get_param_value DRAFT_NUM_PREDICT)" >> "$modelfile_path"
+
+    echo -e "\n# --- Penalties & Repetition ---" >> "$modelfile_path"
+    is_param_active REPEAT_PENALTY   && echo "PARAMETER repeat_penalty   $(get_param_value REPEAT_PENALTY)" >> "$modelfile_path"
+    is_param_active REPEAT_LAST_N    && echo "PARAMETER repeat_last_n    $(get_param_value REPEAT_LAST_N)" >> "$modelfile_path"
+    is_param_active PRESENCE_PENALTY && echo "PARAMETER presence_penalty $(get_param_value PRESENCE_PENALTY)" >> "$modelfile_path"
+    is_param_active FREQUENCY_PENALTY && echo "PARAMETER frequency_penalty $(get_param_value FREQUENCY_PENALTY)" >> "$modelfile_path"
+
+    echo -e "\n# --- Hardware & Performance Knobs ---" >> "$modelfile_path"
+    is_param_active NUM_KEEP       && echo "PARAMETER num_keep         $(get_param_value NUM_KEEP)" >> "$modelfile_path"
+    is_param_active NUM_THREAD     && echo "PARAMETER num_thread       $(get_param_value NUM_THREAD)" >> "$modelfile_path"
+    is_param_active NUM_GPU        && echo "PARAMETER num_gpu          $(get_param_value NUM_GPU)" >> "$modelfile_path"
+    is_param_active MAIN_GPU       && echo "PARAMETER main_gpu         $(get_param_value MAIN_GPU)" >> "$modelfile_path"
+    is_param_active NUMA           && echo "PARAMETER numa             $(get_param_value NUMA)" >> "$modelfile_path"
+    is_param_active LOW_VRAM       && echo "PARAMETER low_vram         $(get_param_value LOW_VRAM)" >> "$modelfile_path"
+    is_param_active F16_KV         && echo "PARAMETER f16_kv           $(get_param_value F16_KV)" >> "$modelfile_path"
+    is_param_active VOCAB_ONLY     && echo "PARAMETER vocab_only       $(get_param_value VOCAB_ONLY)" >> "$modelfile_path"
+    is_param_active USE_MMAP       && echo "PARAMETER use_mmap         $(get_param_value USE_MMAP)" >> "$modelfile_path"
+    is_param_active USE_MLOCK      && echo "PARAMETER use_mlock        $(get_param_value USE_MLOCK)" >> "$modelfile_path"
+    is_param_active EMBEDDING_ONLY && echo "PARAMETER embedding_only   $(get_param_value EMBEDDING_ONLY)" >> "$modelfile_path"
+
+    echo "Created Modelfile: $modelfile_path"
+    ollama create "$organization-$model_name" -f "$modelfile_path"
+    echo "To update the model: ollama create \"$organization-$model_name\" -f \"$modelfile_path\""
 done
