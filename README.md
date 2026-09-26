@@ -6,7 +6,6 @@ A centralized repository for storing and managing custom **Ollama Modelfiles**. 
 
 ```
 ollama-modelfiles/
-├── downloads/
 ├── models/
 ├── config.bash              # Active configuration
 ├── config-example.bash      # Configuration template
