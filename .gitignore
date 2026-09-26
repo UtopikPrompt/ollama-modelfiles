@@ -1,3 +1,4 @@
 # Ignore configuration and example files
 /models
 /downloads
+config.bash
