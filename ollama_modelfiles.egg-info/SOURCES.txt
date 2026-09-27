@@ -1,0 +1,10 @@
+README.md
+pyproject.toml
+ollama_modelfiles.egg-info/PKG-INFO
+ollama_modelfiles.egg-info/SOURCES.txt
+ollama_modelfiles.egg-info/dependency_links.txt
+ollama_modelfiles.egg-info/requires.txt
+ollama_modelfiles.egg-info/top_level.txt
+tests/__init__.py
+tests/__main__.py
+tests/test_split_model_download.py
