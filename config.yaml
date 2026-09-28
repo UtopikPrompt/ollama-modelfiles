@@ -3,53 +3,53 @@
 # No inheritance - Ollama's defaults are overridden by these values
 
 # Context Window
-NUM_CTX: "65536"
+num_ctx: "65536"
 
 # Max Output Tokens
-# NUM_PREDICT: "${NUM_PREDICT}"
+# num_predict: "${NUM_PREDICT}"
 
 # System Prompt
-# SYSTEM: "${SYSTEM}"
+# system: "${SYSTEM}"
 
 # Sampling Parameters
-# TEMPERATURE: 0.7
-# TOP_P: 0.9
-# TOP_K: 40
-# REPEAT_PENALTY: 1.1
-# REPEAT_LAST_N: 64
-# REPEAT_PENALTY_PREFIX: 1.1
-# MIN_P: 0.1
-# MINING_P: 0.5
-# SEED: 42
+# temperature: 0.7
+# top_p: 0.9
+# top_k: 40
+# repeat_penalty: 1.1
+# repeat_last_n: 64
+# repeat_penalty_prefix: 1.1
+# min_p: 0.1
+# mining_p: 0.5
+# seed: 42
 
 # Mirostat Parameters
-# MIROSTAT: 0
-# MIROSTAT_TAU: 5.0
-# MIROSTAT_ETA: 0.1
-# PENALIZE_NEW_TOKENS: 0.5
+# mirostat: 0
+# mirostat_tau: 5.0
+# mirostat_eta: 0.1
+# penalize_new_tokens: 0.5
 
 # Context & Token Limits
-# NUM_PREDICT: 4096
-# NUM_CTX: 65536
-# NUM_BATCH: 512
+# num_predict: 4096
+# num_ctx: 65536
+# num_batch: 512
 
 # Hardware Parameters
-# NUM_THREAD: 4
-# NUM_GPU: -1
-# SWAP_SPACE: 4
+# num_thread: 4
+# num_gpu: -1
+# swap_space: 4
 
 # Additional Parameters
-# NUM_KEEP: 4
-# MAIN_GPU: 0
-# NUMA: false
-# LOW_VRAM: false
-# F16_KV: true
-# VOCAB_ONLY: false
-# USE_MMAP: true
-# USE_MLOCK: false
-# EMBEDDING_ONLY: false
+# num_keep: 4
+# main_gpu: 0
+# numa: false
+# low_vram: false
+# f16_kv: true
+# vocab_only: false
+# use_mmap: true
+# use_mlock: false
+# embedding_only: false
 
 # Stop Sequences
-# STOP_1: "<|eot_id|>"
-# STOP_2: "User:"
-# STOP_3: "Assistant:"
+# stop_1: "<|eot_id|>"
+# stop_2: "User:"
+# stop_3: "Assistant:"

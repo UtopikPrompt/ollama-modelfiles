@@ -13,15 +13,57 @@ import os
 import re
 import subprocess
 import sys
-import urllib.request
+import urllib
 from pathlib import Path
 import yaml
+from hf_hub import HFHubClient, ModelMetadata, fetch_model_metadata
+
+
+def create_parser() -> argparse.ArgumentParser:
+    """Create and configure the argument parser."""
+    parser = argparse.ArgumentParser(
+        description="Ollama Modelfile Generator - Downloads GGUF model files from Hugging Face and creates Ollama Modelfiles",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s https://huggingface.co/Jackrong/Qwen3.5-4B-GGUF/main
+  %(prog)s -f https://huggingface.co/Jackrong/Qwen3.5-4B-GGUF/main
+  %(prog)s -n https://huggingface.co/Jackrong/Qwen3.5-4B-GGUF/main
+        """
+    )
+    parser.add_argument(
+        'model_url',
+        type=str,
+        help='Hugging Face model URL (e.g., https://huggingface.co/Jackrong/Qwen3.5-4B-GGUF/main)'
+    )
+    parser.add_argument(
+        '-f', '--force',
+        action='store_true',
+        help='Force download even if file exists'
+    )
+    parser.add_argument(
+        '-n', '--no-download',
+        action='store_true',
+        help="Don't download any models"
+    )
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Enable verbose output'
+    )
+    return parser
 
 
 class OllamaModelfileGenerator:
-    def __init__(self, models_dir: str = "models", downloads_dir: str = "models"):
-        self.models_dir = Path(models_dir)
-        self.downloads_dir = Path(downloads_dir)
+    def __init__(self, models_dir: str = "models", downloads_dir: str | None = None, *, config_dir: str | None = None, config_path: str | None = None, verbose: bool | None = None, env: bool | None = None):
+        self.models_dir = Path(models_dir) if models_dir else Path("models")
+        self.downloads_dir = Path(downloads_dir) if downloads_dir else Path("models")
+        # config_dir is an alias for downloads_dir, provided for API compatibility
+        self.config_dir = config_dir if config_dir else downloads_dir
+        # config_path is the actual path to the config file (optional)
+        self.config_path = config_path
+        self.verbose = verbose if verbose is not None else False
+        self.env = env if env is not None else False
         
     def show_usage(self):
         print("Usage: python create-modelfile.py [OPTIONS] <model_url>")
@@ -219,6 +261,80 @@ class OllamaModelfileGenerator:
         print(f'\r  [████] 100% - Downloaded {total_size / 1024 / 1024:.2f} MB (all {total_chunks} chunks)\n', flush=True)
         return total_chunks
 
+    def fetch_metadata(self, model_url: str) -> ModelMetadata | None:
+        """Fetch metadata for a model from Hugging Face Hub.
+        
+        Args:
+            model_url: URL of the model (e.g., "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/main")
+            
+        Returns:
+            ModelMetadata object if successful, None otherwise
+        """
+        try:
+            # Extract repo ID from URL (e.g., "unsloth/Qwen3.5-4B-GGUF")
+            repo_id = self.extract_organization(model_url)
+            if not repo_id:
+                print("  ✗ Could not extract organization from URL")
+                return None
+            
+            # Extract model name from URL (e.g., "Qwen3.5-4B-GGUF")
+            model_name = self.extract_model_name(model_url)
+            if not model_name:
+                print("  ✗ Could not extract model name from URL")
+                return None
+            
+            # Construct HF Hub URL
+            hf_url = f"https://huggingface.co/api/models/{repo_id}/{model_name}"
+            
+            # Fetch metadata using HFHubClient
+            metadata = fetch_model_metadata(hf_url)
+            if metadata:
+                print(f"  ✓ Metadata fetched: {metadata.name} ({metadata.size_in_gb:.2f} GB)")
+            return metadata
+            
+        except Exception as e:
+            print(f"  ⚠ Could not fetch metadata: {e}")
+            return None
+
+    def generate_modelfile_name(self, model_url: str, metadata: ModelMetadata | None = None) -> str:
+        """Generate an enhanced modelfile name using metadata.
+        
+        If metadata is available, uses format: {model_name}-{size_in_gb}-{quantization}
+        Otherwise, falls back to: {organization}-{model_name}
+        
+        Args:
+            model_url: URL of the model
+            metadata: Optional metadata for enhanced naming
+            
+        Returns:
+            Enhanced modelfile name
+        """
+        # Extract base organization and model name
+        organization = self.extract_organization(model_url)
+        model_name = self.extract_model_name(model_url)
+        
+        # Try to extract quantization from model name
+        quantization = ""
+        for q in ["Q4_K_M", "Q4_0", "Q5_K_M", "Q5_0", "Q6_K", "Q6_K_M", 
+                  "Q8_0", "Q8_1", "Q8_K_M", "Q2_K", "Q3_K_M", "Q4_0", 
+                  "Q5_K_S", "Q5_K_M", "Q6_K", "Q8_0", "Q8_1"]:
+            if q in model_name:
+                quantization = q
+                break
+        
+        # Use metadata for enhanced naming if available
+        if metadata:
+            size_gb = metadata.size_in_gb
+            name_parts = [model_name]  # Preserve full model name including chunk suffix
+            if size_gb:
+                name_parts.append(f"{size_gb:.1f}GB")
+            if quantization:
+                name_parts.append(quantization)
+            return "-".join(name_parts)
+        
+        # Fallback naming
+        return f"{organization}-{model_name}"
+
     def extract_organization(self, model_url: str) -> str:
         """Extract organization from URL (e.g., "unsloth" from "huggingface.co/unsloth/Qwen3.5-4B-GGUF/...")"""
         # Match pattern: huggingface.co/{org}/{repo}/...
@@ -232,10 +348,21 @@ class OllamaModelfileGenerator:
         return ""
 
     def extract_model_name(self, model_url: str) -> str:
-        """Extract model name from URL (handle filenames with spaces)"""
+        """Extract model name from URL (handle filenames with spaces).
+        
+        For split models, strips the chunk suffix to get the base name.
+        e.g., "Qwen3.5-4B-GGUF-00006.gguf" -> "Qwen3.5-4B-GGUF"
+        """
         # Get filename without extension
         filename = Path(model_url).name
         model_name = filename.rsplit(".", 1)[0] if "." in filename else filename
+        
+        # For split models, remove chunk suffix
+        # Pattern: -XXXXX-of-XXXXX (e.g., -00001-of-00003)
+        chunk_match = re.search(r'-\d{5}-of-\d{5}$', model_name)
+        if chunk_match:
+            model_name = model_name[:chunk_match.start()]
+        
         # Limit to 50 chars
         return model_name[:50]
 
@@ -273,8 +400,16 @@ FROM ../../${downloads_dir}/${organization}/${model_name}.gguf
         with open(modelfile_path, "w") as f:
             f.write(heredoc_content)
 
-    def create_modelfile(self, model_url: str, organization: str, model_name: str, downloads_dir: str):
-        """Download model and create Modelfile with parameters"""
+    def create_modelfile(self, model_url: str, organization: str, model_name: str, downloads_dir: str, metadata: ModelMetadata | None = None):
+        """Download model and create Modelfile with parameters
+        
+        Args:
+            model_url: URL of the model
+            organization: Organization name from URL
+            model_name: Model name from URL
+            downloads_dir: Path to downloads directory
+            metadata: Optional Hugging Face metadata for enhanced naming
+        """
         # Create directories if they don't exist
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.downloads_dir.mkdir(parents=True, exist_ok=True)
@@ -285,13 +420,15 @@ FROM ../../${downloads_dir}/${organization}/${model_name}.gguf
         # Extract base filename without chunk suffix for split models
         # e.g., "qwen2.5-coder-32b-instruct-q5_k_m-00001-of-00003" -> "qwen2.5-coder-32b-instruct-q5_k_m"
         base_model_name = model_name
-        chunk_match = re.search(r'-([0-9]{5})-of-([0-9]{5})\.', model_name)
+        chunk_match = re.search(r'-([0-9]{5})-of-([0-9]{5})$', model_name)
         if chunk_match:
             # Remove the chunk suffix to get the base filename
             base_model_name = model_name[:chunk_match.start()]
         
         download_file = self.downloads_dir / organization / f"{base_model_name}.gguf"
-        modelfile_path = self.models_dir / organization / f"{base_model_name}.Modelfile"
+        # Use metadata for enhanced modelfile naming
+        modelfile_name = metadata.generate_modelfile_name(model_name) if hasattr(metadata, 'generate_modelfile_name') else base_model_name
+        modelfile_path = self.models_dir / organization / f"{modelfile_name}.Modelfile"
 
         # 1. Create the base template structure
         self.create_base_modelfile(modelfile_path, organization, model_name, downloads_dir)
@@ -383,6 +520,9 @@ FROM ../../${downloads_dir}/${organization}/${model_name}.gguf
         print(f"  Organization: {organization}")
         print(f"  Model name: {model_name}")
 
+        # Fetch metadata for enhanced naming
+        metadata = self.fetch_metadata(model_url)
+
         # Create organization subdirectory in downloads if it doesn't exist
         (self.downloads_dir / organization).mkdir(parents=True, exist_ok=True)
 
@@ -408,45 +548,134 @@ FROM ../../${downloads_dir}/${organization}/${model_name}.gguf
         # Create organization subdirectory in models/ if it doesn't exist
         (self.models_dir / organization).mkdir(parents=True, exist_ok=True)
 
-        self.create_modelfile(model_url, organization, model_name, str(self.downloads_dir))
+        # Generate modelfile name - use metadata for enhanced naming
+        modelfile_name = self.generate_modelfile_name(model_url, metadata)
+        print(f"  Modelfile name: {modelfile_name}")
+
+        # Pass downloads_dir last, then modelfile_name
+        self.create_modelfile(model_url, organization, model_name, str(self.downloads_dir), modelfile_name)
+        print("\nOllama Modelfile Generator - Downloads GGUF models and creates Modelfiles")
+
+    @staticmethod
+    def create_parser():
+        """Create and return the argument parser"""
+        parser = argparse.ArgumentParser(
+            description="Ollama Modelfile Generator - Downloads GGUF models and creates Modelfiles",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog="""
+Examples:
+  %(prog)s https://huggingface.co/Qwen/Qwen2.5-32B-Instruct-GGUF/main
+  %(prog)s https://huggingface.co/Qwen/Qwen2.5-32B-Instruct-GGUF/main -n my-model
+  %(prog)s https://huggingface.co/Qwen/Qwen2.5-32B-Instruct-GGUF/main -d ./custom-downloads
+  %(prog)s https://huggingface.co/Qwen/Qwen2.5-32B-Instruct-GGUF/main --no-download
+  %(prog)s https://huggingface.co/Qwen/Qwen2.5-32B-Instruct-GGUF/main --verbose
+
+Environment Variables:
+  OLLAMA_DOWNLOADS_DIR    Path to downloads directory (default: ./downloads)
+  OLLAMA_MODELS_DIR       Path to models directory (default: ./models)
+  OLLAMA_CONFIG_DIR       Path to config directory (default: ./downloads)
+  OLLAMA_NO_DOWNLOAD      Set to '1' to skip all downloads
+"""
+        )
+
+        # Main positional argument
+        parser.add_argument(
+            "url",
+            type=str,
+            help="Hugging Face model URL to process (e.g., https://huggingface.co/Qwen/Qwen2.5-32B-Instruct-GGUF/main)"
+        )
+
+        # Download options
+        parser.add_argument(
+            "-n", "--name",
+            type=str,
+            default=None,
+            help="Custom name for the modelfile (overrides auto-generated name)"
+        )
+        parser.add_argument(
+            "-d", "--downloads-dir",
+            type=str,
+            default=None,
+            help="Path to downloads directory (default: ./downloads)"
+        )
+        parser.add_argument(
+            "-m", "--models-dir",
+            type=str,
+            default=None,
+            help="Path to models directory (default: ./models)"
+        )
+        parser.add_argument(
+            "--no-download",
+            action="store_true",
+            help="Skip model download, only create modelfile from existing file"
+        )
+
+        # Configuration options
+        parser.add_argument(
+            "-c", "--config",
+            type=str,
+            default=None,
+            help="Path to config.yaml file"
+        )
+        parser.add_argument(
+            "-v", "--verbose",
+            action="store_true",
+            help="Enable verbose output"
+        )
+        parser.add_argument(
+            "--config-dir",
+            type=str,
+            default=None,
+            help="Path to config directory (default: ./downloads)"
+        )
+
+        # Environment variable overrides
+        parser.add_argument(
+            "--env",
+            action="store_true",
+            help="Load all environment variables as config"
+        )
+
+        # Help is handled by argparse automatically
+        # parser.add_argument(
+        #     "-h", "--help",
+        #     action="help",
+        #     help="Show this help message and exit"
+        # )
+
+        return parser
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Ollama Modelfile Generator - Downloads GGUF models and creates Modelfiles"
-    )
-    parser.add_argument(
-        "model_url",
-        type=str,
-        help="URL of the GGUF model from Hugging Face"
-    )
-    parser.add_argument(
-        "-f", "--force",
-        action="store_true",
-        help="Force download even if file exists"
-    )
-    parser.add_argument(
-        "-n", "--no-download",
-        action="store_true",
-        help="Don't download any models"
-    )
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Verbose output"
-    )
+    """Main entry point"""
+    # Create argument parser
+    parser = OllamaModelfileGenerator.create_parser()
 
+    # Parse arguments
     args = parser.parse_args()
 
-    generator = OllamaModelfileGenerator()
-    # generator.show_usage()
+    # Validate required arguments
+    if not args.url:
+        parser.print_help()
+        print("\nError: URL is required")
+        print("Usage: %(prog)s <huggingface-model-url>")
+        exit(1)
 
-    if args.no_download and len(sys.argv) > 1:
-        print("Error: --no-download requires a model URL")
-        sys.exit(1)
+    # Create generator instance
+    generator = OllamaModelfileGenerator(
+        downloads_dir=args.downloads_dir,
+        models_dir=args.models_dir,
+        config_dir=args.config_dir,
+        config_path=args.config,
+        verbose=args.verbose,
+        env=args.env
+    )
 
-    generator.process_model(args.model_url, force=args.force, no_download=args.no_download)
+    # Process model
+    generator.process_model(args.url, force=False, no_download=args.no_download)
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    exit(main())

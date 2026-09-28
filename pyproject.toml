@@ -25,6 +25,8 @@ classifiers = [
 ]
 dependencies = [
     "pytest>=8.0",
+    "pyyaml>=6.0",
+    "huggingface-hub >= 0.24.0"
 ]
 
 [project.optional-dependencies]
@@ -37,9 +39,3 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]

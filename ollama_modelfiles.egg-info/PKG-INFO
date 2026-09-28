@@ -16,6 +16,8 @@ Classifier: Programming Language :: Python :: 3.14
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: pytest>=8.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: huggingface-hub>=0.24.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 
