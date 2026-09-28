@@ -7,4 +7,4 @@ ollama_modelfiles.egg-info/requires.txt
 ollama_modelfiles.egg-info/top_level.txt
 tests/__init__.py
 tests/__main__.py
-tests/test_split_model_download.py
+tests/test_model_download.py

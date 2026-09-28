@@ -1,4 +1,204 @@
-# Ignore configuration and example files
-/models
-/downloads
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+wheel/
+*.egg-info/
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# ruff
+.ruff_cache/
+
+# Pylance
+.pylance/
+
+# Pyre type checker
+.pybinder/
+
+# CSREnv
+.CSREnv/
+
+# IPython
+.profile
+
+# pyenv
+.python-version
+
+# python -m venv
+instance
+
+# Pyre type checker
+.pybinder/
+
+# Pyre type checker
+.pyre/
+
+# ruff
+.ruff_cache/
+
+# Pylance
+.pylance/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pytest
+.pytest_cache/
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Project specific
 config.bash
+config-example.yaml
+models/
+downloads/
+config.yaml
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+*.so
+*.dll
+*.dylib
+*.exe
+*.exe~
+*.msi
+*.msi~
+*.msix
+*.msixbundle
+*.msixmanifest
+*.msixsetup
+*.spec
+
+# Distribution
+*.egg
+*.egg-info/
+*.dist-info/
+
+# Compiled Python
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python version pinning
+.python-version
+
+# Environment
+.env
+.env.*
+
+# Logs
+*.log
