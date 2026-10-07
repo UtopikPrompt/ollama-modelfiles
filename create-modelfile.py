@@ -55,7 +55,7 @@ Examples:
 
 
 class OllamaModelfileGenerator:
-    def __init__(self, models_dir: str = "models", downloads_dir: str | None = None, *, config_dir: str | None = None, config_path: str | None = None, verbose: bool | None = None, env: bool | None = None):
+    def __init__(self, models_dir: str = "models", downloads_dir: str | None = None, *, config_dir: str | None = None, config_path: str | None = None, verbose: bool | None = None, env: bool | None = None, force: bool = False):
         self.models_dir = Path(models_dir) if models_dir else Path("models")
         self.downloads_dir = Path(downloads_dir) if downloads_dir else Path("models")
         # config_dir is an alias for downloads_dir, provided for API compatibility
@@ -64,6 +64,7 @@ class OllamaModelfileGenerator:
         self.config_path = config_path
         self.verbose = verbose if verbose is not None else False
         self.env = env if env is not None else False
+        self.force = force
         
     def show_usage(self):
         print("Usage: python create-modelfile.py [OPTIONS] <model_url>")
@@ -142,7 +143,10 @@ class OllamaModelfileGenerator:
     def download_file(self, url: str, dest_path: Path, force: bool = False) -> bool:
         """Download a file from URL to destination with progress bar"""
         try:
-            if dest_path.exists() and not force:
+            # Use self.force if force argument is not provided
+            actual_force = force or self.force
+            
+            if dest_path.exists() and not actual_force:
                 print(f"  ✓ File already exists: {dest_path}")
                 return True
             
@@ -508,9 +512,12 @@ FROM ../../${downloads_dir}/${organization}/${model_name}.gguf
                     f.write(f"PARAMETER {param} {value}\n")
 
         print(f"\nCreated Modelfile: {modelfile_path}")
-        print(f"To update the model: ollama create \"{organization}-{model_name}\" -f \"{modelfile_path}\"")
+        
+        # Only print ollama create instruction unless --no-ollama-create flag is set
+        if not no_ollama_create:
+            print(f"To update the model: ollama create \"{organization}-{model_name}\" -f \"{modelfile_path}\"")
 
-    def process_model(self, model_url: str, force: bool = False, no_download: bool = False):
+    def process_model(self, model_url: str, force: bool = False, no_download: bool = False, no_ollama_create: bool = False):
         """Process a single model"""
         print(f"\nProcessing: {model_url}")
 
@@ -635,6 +642,16 @@ Environment Variables:
             action="store_true",
             help="Load all environment variables as config"
         )
+        parser.add_argument(
+            "--no-ollama-create",
+            action="store_true",
+            help="Skip the ollama create instruction after generating Modelfile"
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Force creation of new Modelfile even if model exists"
+        )
 
         # Help is handled by argparse automatically
         # parser.add_argument(
@@ -668,12 +685,12 @@ def main():
         config_dir=args.config_dir,
         config_path=args.config,
         verbose=args.verbose,
-        env=args.env
+        env=args.env,
+        force=args.force
     )
 
     # Process model
-    generator.process_model(args.url, force=False, no_download=args.no_download)
-
+    generator.process_model(args.url, force=args.force, no_download=args.no_download, no_ollama_create=args.no_ollama_create)
     return 0
 
 
