@@ -28,8 +28,6 @@ wheel/
 pip-log.txt
 pip-delete-this-directory.txt
 
-
-
 # Unit test / coverage reports
 htmlcov/
 .tox/
@@ -46,10 +44,6 @@ coverage.xml
 
 # Translations
 *.mo
-
-# Models (ignored, except example.env)
-models/
-!models/example.env
 
 # Environments
 .env
@@ -144,7 +138,12 @@ config.yaml
 # Logs
 *.log
 
+# Environment variables
+.env
+.env.*
+!.env.example
 
+# Python
 *.pyc
 *.pyo
 *.pyd
@@ -203,6 +202,3 @@ Thumbs.db
 
 # Logs
 *.log
-config.yaml
-.env
-!.env.example

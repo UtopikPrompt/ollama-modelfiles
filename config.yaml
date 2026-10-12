@@ -1,126 +1,55 @@
 # Ollama Modelfiles Configuration
-#
-# This file is the **SOURCE OF TRUTH** for all parameters.
-# Uncomment parameters to enable them; commented parameters are ignored.
-#
-# Environment Variable Support:
-#   Use ${VAR_NAME} syntax to reference environment variables:
-#   - num_predict: "${NUM_PREDICT}"  # Will use env var if set
-#
-# Parameter Groups:
-#   Parameters are organized by category for easier editing.
-#   All uncommented parameters are applied to the Modelfile.
-#
-# Validation:
-#   - Integer parameters: validated for valid values
-#   - Float parameters: validated for valid ranges
-#   - Invalid values will cause the script to exit with an error
-#
-# Priority Order (higher wins):
-#   1. Model defaults (Ollama)
-#   2. This config file (uncommented parameters)
-#   3. Environment variables
-#   4. Command-line arguments
+# Flat YAML format - values are directly copied to Modelfile
+# No inheritance - Ollama's defaults are overridden by these values
 
-modelfile:
-  parameters:
-    # ============================================
-    # CONTEXT WINDOW
-    # ============================================
-    num_ctx: 65536
-    # num_batch: 512
-    # num_ctx_total: 16384
+# Context Window
+num_ctx: "65536"
 
-    # ============================================
-    # SAMPLING PARAMETERS
-    # ============================================
-    # temperature: 0.7
-    # top_p: 0.9
-    # top_k: 40
-    # repeat_penalty: 1.1
-    # repeat_last_n: 64
-    # repeat_penalty_prefix: 1.1
+# Max Output Tokens
+# num_predict: "${NUM_PREDICT}"
 
-    # ============================================
-    # MIN P (Nucleus Sampling)
-    # ============================================
-    # min_p: 0.1
-    # mining_p: 0.5
+# System Prompt
+# system: "${SYSTEM}"
 
-    # ============================================
-    # MIROSTAT PARAMETERS
-    # ============================================
-    # mirostat: 0
-    # mirostat_tau: 5.0
-    # mirostat_eta: 0.1
-    # penalize_new_tokens: 0.5
+# Sampling Parameters
+# temperature: 0.7
+# top_p: 0.9
+# top_k: 40
+# repeat_penalty: 1.1
+# repeat_last_n: 64
+# repeat_penalty_prefix: 1.1
+# min_p: 0.1
+# mining_p: 0.5
+# seed: 42
 
-    # ============================================
-    # HARDWARE SETTINGS
-    # ============================================
-    # num_thread: 4
-    # num_gpu: -1
-    # swap_space: 4
-    # main_gpu: 0
-    # numa: false
-    # low_vram: false
-    # f16_kv: true
-    # vocab_only: false
-    # use_mmap: true
-    # use_mlock: false
-    # embedding_only: false
+# Mirostat Parameters
+# mirostat: 0
+# mirostat_tau: 5.0
+# mirostat_eta: 0.1
+# penalize_new_tokens: 0.5
 
-    # ============================================
-    # ADDITIONAL PARAMETERS
-    # ============================================
-    # num_keep: 4
+# Context & Token Limits
+# num_predict: 4096
+# num_ctx: 65536
+# num_batch: 512
 
-    # ============================================
-    # STOP SEQUENCES
-    # Uncomment to add stop sequences
-    # ============================================
-    # stop_1: "<|eot_id|>"
-    # stop_2: "User:"
-    # stop_3: "Assistant:"
+# Hardware Parameters
+# num_thread: 4
+# num_gpu: -1
+# swap_space: 4
 
-    # ============================================
-    # ENVIRONMENT VARIABLE EXAMPLES
-    # Uncomment and set env vars to use:
-    # ============================================
-    # num_predict: "${NUM_PREDICT}"
-    # system: "${SYSTEM_PROMPT}"
-    # temperature: "${TEMPERATURE}"
-    # top_p: "${TOP_P}"
+# Additional Parameters
+# num_keep: 4
+# main_gpu: 0
+# numa: false
+# low_vram: false
+# f16_kv: true
+# vocab_only: false
+# use_mmap: true
+# use_mlock: false
+# embedding_only: false
 
-    # ============================================
-    # DISABLED PARAMETERS
-    # Leave commented to use Ollama defaults
-    # ============================================
-    # seed: 42
-    # num_predict: 4096
-    # num_ctx: 65536
-    # num_batch: 512
-    # repeat_last_n: 64
-    # repeat_penalty_prefix: 1.1
-    # min_p: 0.1
-    # mining_p: 0.5
-    # mirostat: 0
-    # mirostat_tau: 5.0
-    # mirostat_eta: 0.1
-    # penalize_new_tokens: 0.5
-    # num_thread: 4
-    # num_gpu: -1
-    # swap_space: 4
-    # main_gpu: 0
-    # numa: false
-    # low_vram: false
-    # f16_kv: true
-    # vocab_only: false
-    # use_mmap: true
-    # use_mlock: false
-    # embedding_only: false
-    # num_keep: 4
-    # stop_1: "<|eot_id|>"
-    # stop_2: "User:"
-    # stop_3: "Assistant:"
-    # seed: 42
+# Stop Sequences
+# stop_1: "<|eot_id|>"
+# stop_2: "User:"
+# stop_3: "Assistant:"
