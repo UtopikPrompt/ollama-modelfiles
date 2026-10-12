@@ -1,2 +1,426 @@
-# Ignore configuration and example files
-config.yaml
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environment
+venv/
+.env
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.pytest
+
+# Coverage data
+*.cover
+htmlcov/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Ollama
+.ollama/
+models/
+
+# Hugging Face
+.hf_cache/
+
+# Pytest
+.pytest/
+
+# Coverage
+coverage.xml
+htmlcov/
+
+# mypy
+.mypy_cache/
+.pytype/
+
+# build
+*.egg-info/
+*.egg
+
+# Distribution
+*.dist-info/
+build/
+dist/
+
+# .mypy_cache
+.mypy_cache/
+
+# .pytest_cache
+.pytest_cache/
+
+# .coverage
+.coverage
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Ollama
+.ollama/
+models/
+
+# HF cache
+.hf_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Coverage
+*.cover
+htmlcov/
+
+# Pytest artifacts
+.pytest/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# Generated files
+*.mdc
+*.mdx
+
+# Pre-commit hooks
+.pre-commit-report.yaml
+.pre-commit-hooks-report.yaml
+
+# Build artifacts
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env
+.venv
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Ollama
+.ollama/
+models/
+
+# Hugging Face
+.hf_cache/
+
+# Coverage
+*.cover
+htmlcov/
+
+# Pytest
+.pytest_cache/
+.coverage
+
+# mypy
+.mypy_cache/
+.pytype/
+
+# build
+*.egg-info/
+*.egg
+build/
+dist/
+
+# Distribution
+*.dist-info/
+
+# Temporary
+*.tmp
+*.bak
+*.swp
+
+# Generated
+*.mdc
+*.mdx
+
+# Pre-commit
+.pre-commit-report.yaml
+.pre-commit-hooks-report.yaml
+
+# Virtual environment
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Ollama
+.ollama/
+models/
+
+# HF cache
+.hf_cache/
+
+# Coverage
+*.cover
+htmlcov/
+
+# Pytest
+.pytest_cache/
+.coverage
+
+# mypy
+.mypy_cache/
+.pytype/
+
+# build
+*.egg-info/
+*.egg
+build/
+dist/
+
+# Distribution
+*.dist-info/
+
+# Temporary
+*.tmp
+*.bak
+*.swp
+
+# Generated
+*.mdc
+*.mdx
+
+# Pre-commit
+.pre-commit-report.yaml
+.pre-commit-hooks-report.yaml
+
+# Virtual environment
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Ollama
+.ollama/
+models/
+
+# HF cache
+.hf_cache/
+
+# Coverage
+*.cover
+htmlcov/
+
+# Pytest
+.pytest_cache/
+.coverage
+
+# mypy
+.mypy_cache/
+.pytype/
+
+# build
+*.egg-info/
+*.egg
+build/
+dist/
+
+# Distribution
+*.dist-info/
+
+# Temporary
+*.tmp
+*.bak
+*.swp
+
+# Generated
+*.mdc
+*.mdx
+
+# Pre-commit
+.pre-commit-report.yaml
+.pre-commit-hooks-report.yaml
+
+# Virtual environment
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Ollama
+.ollama/
+models/
+
+# HF cache
+.hf_cache/
+
+# Coverage
+*.cover
+htmlcov/
+
+# Pytest
+.pytest_cache/
+.coverage
+
+# mypy
+.mypy_cache/
+.pytype/
+
+# build
+*.egg-info/
+*.egg
+build/
+dist/
+
+# Distribution
+*.dist-info/
+
+# Temporary
+*.tmp
+*.bak
+*.swp
+
+# Generated
+*.mdc
+*.mdx
+
+# Pre-commit
+.pre-commit-report.yaml
+.pre-commit-hooks-report.yaml
+
+# Virtual environment
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
