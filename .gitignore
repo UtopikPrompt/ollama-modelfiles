@@ -206,3 +206,10 @@ Thumbs.db
 config.yaml
 .env
 !.env.example
+.env
+!.env.example
+
+.env
+!.env.example
+.env
+!.env.example
