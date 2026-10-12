@@ -1,6 +1,7 @@
 """Hugging Face Hub client for metadata extraction."""
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
@@ -43,6 +44,15 @@ class ModelMetadata:
     
     size_in_gb: Optional[float] = None
     """Model size in gigabytes."""
+    
+    total_bytes: Optional[int] = None
+    """Total file size in bytes (for GGUF split files)."""
+    
+    gguf: Optional[dict] = None
+    """GGUF-specific metadata (architecture, context_length, etc.)."""
+    
+    siblings: Optional[list] = None
+    """List of file siblings (for split GGUF files)."""
     
     @property
     def name(self) -> Optional[str]:
@@ -87,19 +97,74 @@ class HFHubClient:
     RATE_LIMIT_HEADER = "x-ratelimit-remaining"
     RATE_LIMIT_RESET_HEADER = "x-ratelimit-reset"
     
-    def __init__(self, token: Optional[str] = None):
+    def __init__(self, token: Optional[str] = None, downloads_dir: Optional[Path] = None):
         """Initialize the HF Hub client.
         
-        Args:
-            token: Optional Hugging Face API token for authenticated requests.
-                   Can also be set via HUGGINGFACE_TOKEN environment variable.
+        Token lookup order (highest to lowest priority):
+        1. Explicit token argument
+        2. HUGGINGFACE_TOKEN environment variable
+        3. HF_TOKEN from .env file
+        4. HUGGING_FACE_HUB_TOKEN from .env file
         """
-        self.token = token or self._get_token_from_env()
+        # Determine downloads_dir for .env file search (default: models directory)
+        self.downloads_dir = downloads_dir or Path("models")
+        
+        self.token = token or self._get_token_from_env() or self._get_token_from_dotenv()
     
     def _get_token_from_env(self) -> Optional[str]:
         """Get token from environment variable."""
         import os
         return os.environ.get("HUGGINGFACE_TOKEN")
+    
+    def _get_token_from_dotenv(self) -> Optional[str]:
+        """Get token from .env file.
+        
+        Looks for HF_TOKEN or HUGGING_FACE_HUB_TOKEN in the .env file.
+        Searches in:
+        1. Downloads directory (same as config files)
+        2. Home directory
+        3. Current working directory
+        """
+        import os
+        from pathlib import Path
+        
+        # Possible variable names (HF_TOKEN is more common)
+        token_vars = ["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]
+        
+        # Search locations in order of preference
+        search_paths = [
+            self.downloads_dir,  # Same location as config files
+            Path.home(),  # User's home directory
+            Path.cwd()  # Current working directory
+        ]
+        
+        for search_path in search_paths:
+            env_file = search_path / ".env"
+            if env_file.exists():
+                try:
+                    with open(env_file, "r") as f:
+                        for line in f:
+                            line = line.strip()
+                            # Skip empty lines and comments
+                            if not line or line.startswith("#"):
+                                continue
+                            # Parse KEY=value
+                            if "=" in line:
+                                key, _, value = line.partition("=")
+                                key = key.strip()
+                                value = value.strip()
+                                # Remove quotes if present
+                                if (value.startswith('"') and value.endswith('"')) or \
+                                   (value.startswith("'") and value.endswith("'")):
+                                    value = value[1:-1]
+                                # Check if this is one of our token variables
+                                if key in token_vars:
+                                    return value
+                except Exception:
+                    # Silently fail if we can't read the .env file
+                    pass
+        
+        return None
     
     def _make_request(self, endpoint: str, headers: dict = None) -> dict:
         """Make HTTP request to HF Hub API.
@@ -175,8 +240,10 @@ class HFHubClient:
         """Get cached metadata if available."""
         import hashlib
         import pickle
+        from pathlib import Path
         
         cache_file = self._get_cache_file()
+        cache_file = Path(cache_file)  # Convert string to Path object
         
         if not cache_file.exists():
             return None
@@ -268,6 +335,19 @@ class HFHubClient:
                 metadata.size_in_gb = size_mb / 1024
             except (ValueError, TypeError):
                 pass
+        
+        # Calculate total size from siblings (for split GGUF files)
+        # API doesn't always return size_in_gb, so we calculate from siblings
+        if metadata.siblings and isinstance(metadata.siblings, list):
+            total_bytes = 0
+            for sibling in metadata.siblings:
+                if isinstance(sibling, dict) and 'size' in sibling:
+                    total_bytes += sibling['size']
+            metadata.total_bytes = total_bytes
+            
+            # Convert to GB for display
+            if metadata.total_bytes:
+                metadata.size_in_gb = round(metadata.total_bytes / (1024**3), 2)
         
         # Sort tags for consistent output
         if metadata.tags and isinstance(metadata.tags, list):

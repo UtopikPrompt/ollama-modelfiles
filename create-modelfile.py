@@ -8,6 +8,8 @@ with configurable parameters.
 Usage: python create-modelfile.py [OPTIONS] <model_url>
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import re
@@ -29,17 +31,13 @@ Examples:
   %(prog)s https://huggingface.co/Jackrong/Qwen3.5-4B-GGUF/main
   %(prog)s -f https://huggingface.co/Jackrong/Qwen3.5-4B-GGUF/main
   %(prog)s -n https://huggingface.co/Jackrong/Qwen3.5-4B-GGUF/main
+  %(prog)s --no-config https://huggingface.co/Jackrong/Qwen3.5-4B-GGUF/main
         """
     )
     parser.add_argument(
         'model_url',
         type=str,
         help='Hugging Face model URL (e.g., https://huggingface.co/Jackrong/Qwen3.5-4B-GGUF/main)'
-    )
-    parser.add_argument(
-        '-f', '--force',
-        action='store_true',
-        help='Force download even if file exists'
     )
     parser.add_argument(
         '-n', '--no-download',
@@ -51,11 +49,16 @@ Examples:
         action='store_true',
         help='Enable verbose output'
     )
+    parser.add_argument(
+        '--no-config',
+        action='store_true',
+        help='Ignore config.yaml/config.bash and use only command-line parameters'
+    )
     return parser
 
 
 class OllamaModelfileGenerator:
-    def __init__(self, models_dir: str = "models", downloads_dir: str | None = None, *, config_dir: str | None = None, config_path: str | None = None, verbose: bool | None = None, env: bool | None = None, force: bool = False):
+    def __init__(self, models_dir: str = "models", downloads_dir: str | None = None, *, config_dir: str | None = None, config_path: str | None = None, verbose: bool | None = None, env: bool | None = None, force: bool = False, no_config: bool = False):
         self.models_dir = Path(models_dir) if models_dir else Path("models")
         self.downloads_dir = Path(downloads_dir) if downloads_dir else Path("models")
         # config_dir is an alias for downloads_dir, provided for API compatibility
@@ -65,6 +68,7 @@ class OllamaModelfileGenerator:
         self.verbose = verbose if verbose is not None else False
         self.env = env if env is not None else False
         self.force = force
+        self.no_config = no_config  # Ignore config files completely
         
     def show_usage(self):
         print("Usage: python create-modelfile.py [OPTIONS] <model_url>")
@@ -73,18 +77,45 @@ class OllamaModelfileGenerator:
         print("  -n, --no-download    Don't download any models")
         print("  -h, --help     Show this help message")
 
+    def resolve_env_var(self, value: str) -> str:
+        """Resolve environment variable placeholders in a value.
+        
+        Supports syntax: ${VAR_NAME}
+        
+        Example:
+          "${NUM_PREDICT}" -> "4096" (if NUM_PREDICT=4096)
+        """
+        import os
+        
+        def replace_var(match):
+            var_name = match.group(1)
+            return os.environ.get(var_name, match.group(0))  # Return original if not found
+        
+        # Pattern to match ${VAR_NAME}
+        pattern = r'\$\{([^}]+)\}'
+        return re.sub(pattern, replace_var, value)
+
     def load_config(self):
-        """Load default parameters from config file if available (flat YAML format)"""
+        """Load default parameters from config file if available (flat YAML format)
+        
+        Supports:
+          - Environment variable placeholders: ${VAR_NAME}
+          - Fallback to config.bash for backward compatibility
+        """
         config = {}
         config_file = self.downloads_dir / "config.yaml"
         if config_file.exists():
             with open(config_file, "r") as f:
                 data = yaml.safe_load(f)
             if isinstance(data, dict):
-                # Directly copy flat YAML values to config
-                for key, value in data.items():
-                    if value is not None:
-                        config[key] = str(value)
+                # Preserve 'parameters' key if present for is_param_active()
+                if "parameters" in data and isinstance(data["parameters"], dict):
+                    config["parameters"] = data["parameters"]
+                else:
+                    # Directly copy flat YAML values to config
+                    for key, value in data.items():
+                        if value is not None:
+                            config[key] = self.resolve_env_var(str(value))
         # Fallback to config.bash for backward compatibility
         if not config:
             if (self.downloads_dir / "config.bash").exists():
@@ -92,11 +123,14 @@ class OllamaModelfileGenerator:
                     content = f.read()
                 # Extract parameter assignments (not commented out)
                 for match in re.finditer(r'^(\w+)\s*=\s*"?([^"\s]+)"?', content, re.MULTILINE):
-                    config[match.group(1)] = match.group(2)
+                    config[match.group(1)] = self.resolve_env_var(match.group(2))
         return config
 
     def is_param_active(self, param_name: str) -> bool:
-        """Check if a parameter is active (not commented out) in config.yaml or config.bash"""
+        """Check if a parameter is active (NOT commented out) in config.yaml or config.bash
+        
+        By default, commented parameters are ignored. Only uncommented parameters are active.
+        """
         config_file = self.downloads_dir / "config.yaml"
         if config_file.exists():
             with open(config_file, "r") as f:
@@ -116,14 +150,14 @@ class OllamaModelfileGenerator:
         with open(self.downloads_dir / "config.bash", "r") as f:
             lines = f.readlines()
         pattern = param_name.lower()
-        # Check if param is commented out
+        # Check if param is commented out (return False if commented)
         if any(
             line.lstrip().startswith("#")
             and re.match(rf'^{pattern}\s*=', line, re.MULTILINE)
             for line in lines
         ):
             return False
-        # Check if param is assigned
+        # Check if param is assigned (not commented)
         return bool(
             any(
                 not line.lstrip().startswith("#")
@@ -292,36 +326,49 @@ class OllamaModelfileGenerator:
     def fetch_metadata(self, model_url: str) -> ModelMetadata | None:
         """Fetch metadata for a model from Hugging Face Hub.
         
+        Handles URLs with query parameters like:
+        https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.5-9B.Q3_K_M.gguf?download=true
+        
         Args:
-            model_url: URL of the model (e.g., "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/main")
+            model_url: URL of the model (with or without query parameters)
             
         Returns:
             ModelMetadata object if successful, None otherwise
         """
         try:
-            # Extract repo ID from URL (e.g., "unsloth/Qwen3.5-4B-GGUF")
-            repo_id = self.extract_organization(model_url)
+            # Strip query parameters FIRST to avoid extracting file name from query params
+            clean_url = model_url.split('?')[0]
+            
+            # Extract repo ID from URL (e.g., "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-GGUF")
+            repo_id = self.extract_organization(clean_url)
             if not repo_id:
-                print("  ✗ Could not extract organization from URL")
+                print("  [ERROR] Could not extract organization from URL")
                 return None
             
-            # Extract model name from URL (e.g., "Qwen3.5-4B-GGUF")
-            model_name = self.extract_model_name(model_url)
+            # Extract model name from URL (e.g., "Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-GGUF")
+            model_name = self.extract_model_name(clean_url)
             if not model_name:
-                print("  ✗ Could not extract model name from URL")
+                print("  [ERROR] Could not extract model name from URL")
                 return None
             
-            # Construct HF Hub URL
+            # Construct HF Hub URL using the MODEL name, NOT the file name
             hf_url = f"https://huggingface.co/api/models/{repo_id}/{model_name}"
             
             # Fetch metadata using HFHubClient
-            metadata = fetch_model_metadata(hf_url)
-            if metadata:
-                print(f"  ✓ Metadata fetched: {metadata.name} ({metadata.size_in_gb:.2f} GB)")
+            token = os.environ.get('HF_TOKEN', os.environ.get('HUGGINGFACE_TOKEN', ''))
+            try:
+                metadata = fetch_model_metadata(repo_id, token=token)
+                if metadata:
+                    size_str = f"{metadata.size_in_gb:.2f} GB" if metadata.size_in_gb else "N/A"
+                    print(f"  [INFO] Metadata fetched: {metadata.name} ({size_str})")
+                else:
+                    print(f"  [INFO] Metadata not fetched: {hf_url}")
+            except Exception as e:
+                print(f"  [INFO] Could not fetch metadata: {e}")
             return metadata
             
         except Exception as e:
-            print(f"  ⚠ Could not fetch metadata: {e}")
+            print(f"  [WARN] Could not fetch metadata: {e}")
             return None
 
     def generate_modelfile_name(self, model_url: str, metadata: ModelMetadata | None = None) -> str:
@@ -364,7 +411,18 @@ class OllamaModelfileGenerator:
         return f"{organization}-{model_name}"
 
     def extract_organization(self, model_url: str) -> str:
-        """Extract organization from URL (e.g., "unsloth" from "huggingface.co/unsloth/Qwen3.5-4B-GGUF/...")"""
+        """Extract organization from URL (e.g., "unsloth" from "huggingface.co/unsloth/Qwen3.5-4B-GGUF/...").
+        
+        Handles both repository URLs and direct file URLs:
+        - Repository URL: https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/main
+        - File URL: https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/model.gguf
+        
+        Args:
+            model_url: URL string
+            
+        Returns:
+            Organization name or empty string if not found
+        """
         # Match pattern: (huggingface.co|hf.co)/{org}/... (org is the first path segment)
         match = re.search(r'(?:huggingface\.co|hf\.co)/([^/]+)/', model_url)
         if match:
@@ -379,12 +437,41 @@ class OllamaModelfileGenerator:
         """Extract model name from URL (handle filenames with spaces).
         
         For split models, strips the chunk suffix to get the base name.
-        e.g., "Qwen3.5-4B-GGUF-00006.gguf" -> "Qwen3.5-4B-GGUF"
+        e.g., "Qwen2.5-coder-32b-instruct-q5_k_m-00006.gguf" -> "Qwen2.5-coder-32b-instruct-q5_k_m"
+        
+        Handles both repository URLs and file URLs:
+        - Repository URL: https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/main
+        - File URL: https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/model.gguf
+        
+        Args:
+            model_url: URL string (may contain query parameters or file paths)
+            
+        Returns:
+            Model name without query parameters or file path
         """
-        # Get filename without extension
+        # Strip query parameters first
+        model_url = model_url.split('?')[0]
+        
+        # Extract model name from the repository URL portion
+        # e.g., "https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.5-9B.Q3_K_M.gguf"
+        # -> "Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
+        # Split by '/' and take the part after 'huggingface.co/'
+        parts = model_url.split('/')
+        for part in parts:
+            if part == 'huggingface.co':
+                # Next part should be the organization
+                if len(parts) > parts.index(part) + 1:
+                    organization = parts[parts.index(part) + 1]
+                    # Next part should be the model name
+                    if len(parts) > parts.index(part) + 2:
+                        model_name = parts[parts.index(part) + 2]
+                        # Strip .gguf extension only (preserve dots in model name)
+                        if model_name.endswith('.gguf'):
+                            model_name = model_name[:-5]
+                        return model_name
+        
+        # Fallback: extract from file path
         filename = Path(model_url).name
-        # If the filename contains a '/', there is a trailing directory component
-        # (e.g. .../Qwen/Qwen2.5-32B-Instruct-GGUF/main), so use the parent name instead.
         if "/" in filename:
             filename = Path(model_url).parent.name
         model_name = filename.rsplit(".", 1)[0] if "." in filename else filename
@@ -432,7 +519,7 @@ FROM ../../${downloads_dir}/${organization}/${model_name}.gguf
         with open(modelfile_path, "w") as f:
             f.write(heredoc_content)
 
-    def create_modelfile(self, model_url: str, organization: str, model_name: str, downloads_dir: str, metadata: ModelMetadata | None = None):
+    def create_modelfile(self, model_url: str, organization: str, model_name: str, downloads_dir: str, metadata: ModelMetadata | None = None, no_ollama_create: bool = True):
         """Download model and create Modelfile with parameters
         
         Args:
@@ -441,6 +528,7 @@ FROM ../../${downloads_dir}/${organization}/${model_name}.gguf
             model_name: Model name from URL
             downloads_dir: Path to downloads directory
             metadata: Optional Hugging Face metadata for enhanced naming
+            no_ollama_create: Skip ollama create instruction if True
         """
         # Create directories if they don't exist
         self.models_dir.mkdir(parents=True, exist_ok=True)
@@ -539,6 +627,24 @@ FROM ../../${downloads_dir}/${organization}/${model_name}.gguf
                 with open(modelfile_path, "a") as f:
                     f.write(f"PARAMETER {param} {value}\n")
 
+        # 4. Populate TEMPLATE placeholder with Qwen3.5 conversation template
+        print("\n# --- Populating Qwen3.5 Conversation Template ---")
+        system_message = "You are a highly helpful, precise local AI assistant."
+        
+        # Write TEMPLATE and SYSTEM sections
+        with open(modelfile_path, "a") as f:
+            f.write(f"#TEMPLATE ")
+            f.write("<|start_header_id|>system<|end_header_id|>\n")
+            f.write("{{- if .System }}{.System}<|eot_id|>\n")
+            f.write("{{- end }}\n")
+            f.write("<|start_header_id|>user<|end_header_id|>\n")
+            f.write("{{- if .Prompt }}{.Prompt}<|eot_id|>\n")
+            f.write("{{- end }}\n")
+            f.write("<|start_header_id|>assistant<|end_header_id|>\n")
+            f.write("{{- .Response }}<|eot_id|>\n")
+            f.write("\n")
+            f.write(f'#SYSTEM "{system_message}"\n\n')
+
         print(f"\nCreated Modelfile: {modelfile_path}")
         
         # Only print ollama create instruction unless --no-ollama-create flag is set
@@ -588,7 +694,7 @@ FROM ../../${downloads_dir}/${organization}/${model_name}.gguf
         print(f"  Modelfile name: {modelfile_name}")
 
         # Pass downloads_dir last, then modelfile_name
-        self.create_modelfile(model_url, organization, model_name, str(self.downloads_dir), modelfile_name)
+        self.create_modelfile(model_url, organization, model_name, str(self.downloads_dir), modelfile_name, no_ollama_create=no_ollama_create)
         print("\nOllama Modelfile Generator - Downloads GGUF models and creates Modelfiles")
 
     @staticmethod
@@ -653,15 +759,15 @@ Environment Variables:
             help="Path to config.yaml file"
         )
         parser.add_argument(
-            "-v", "--verbose",
-            action="store_true",
-            help="Enable verbose output"
-        )
-        parser.add_argument(
             "--config-dir",
             type=str,
             default=None,
             help="Path to config directory (default: ./downloads)"
+        )
+        parser.add_argument(
+            "-v", "--verbose",
+            action="store_true",
+            help="Enable verbose output"
         )
 
         # Environment variable overrides
@@ -679,6 +785,16 @@ Environment Variables:
             "--force",
             action="store_true",
             help="Force creation of new Modelfile even if model exists"
+        )
+        parser.add_argument(
+            "--no-config",
+            action="store_true",
+            help="Ignore config files completely (all parameters disabled by default)"
+        )
+        parser.add_argument(
+            "--env-vars",
+            action="store_true",
+            help="Set all parameters from environment variables"
         )
 
         # Help is handled by argparse automatically
@@ -714,7 +830,8 @@ def main():
         config_path=args.config,
         verbose=args.verbose,
         env=args.env,
-        force=args.force
+        force=args.force,
+        no_config=args.no_config
     )
 
     # Process model
