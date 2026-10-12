@@ -100,33 +100,57 @@ class OllamaModelfileGenerator:
         config_file = self.downloads_dir / "config.yaml"
         if config_file.exists():
             with open(config_file, "r") as f:
-                content = f.read()
-            # Check if param is commented out in YAML (flat format)
-            if re.search(rf'^#{param_name}\s*:', content, re.MULTILINE):
-                return False
-            # Check if param is assigned (not None or empty)
-            return bool(re.search(rf'^{param_name}\s*:\s*[^#]', content, re.MULTILINE))
+                lines = f.readlines()
+            pattern = param_name.lower()
+            # Per-line iteration so a commented duplicate (e.g. `# num_ctx:`)
+            # does not wrongly mark an active `num_ctx:` line inactive.
+            active = any(
+                not line.lstrip().startswith("#")
+                and re.match(rf'^{pattern}\s*:\s*[^#]', line, re.MULTILINE)
+                for line in lines
+            )
+            return bool(active)
         # Fallback to config.bash
         if not (self.downloads_dir / "config.bash").exists():
             return False
         with open(self.downloads_dir / "config.bash", "r") as f:
-            content = f.read()
+            lines = f.readlines()
+        pattern = param_name.lower()
         # Check if param is commented out
-        if re.search(rf'^#{param_name}\s*=', content, re.MULTILINE):
+        if any(
+            line.lstrip().startswith("#")
+            and re.match(rf'^{pattern}\s*=', line, re.MULTILINE)
+            for line in lines
+        ):
             return False
         # Check if param is assigned
-        return bool(re.search(rf'^{param_name}\s*=\s*"?[^"\s]+"?', content, re.MULTILINE))
+        return bool(
+            any(
+                not line.lstrip().startswith("#")
+                and re.match(rf'^{pattern}\s*=\s*"?[^"\s]+"?', line, re.MULTILINE)
+                for line in lines
+            )
+        )
 
     def get_param_value(self, param_name: str) -> str:
         """Get value of a parameter from config.yaml or config.bash"""
         config_file = self.downloads_dir / "config.yaml"
         if config_file.exists():
             with open(config_file, "r") as f:
-                content = f.read()
-            # Try to get value from YAML
-            match = re.search(rf'^{param_name}\s*:\s*([^#]+)', content, re.MULTILINE)
-            if match:
-                value = match.group(1).strip()
+                lines = f.readlines()
+            # Try to get value from YAML (per-line iteration)
+            # Match the key case-insensitively, then pick the last *active* (non-commented) line.
+            matches = []
+            for line in lines:
+                stripped = line.strip()
+                # Skip blank lines and fully-commented lines
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if re.match(rf'^\s*{param_name}\s*:', line, re.IGNORECASE):
+                    matches.append(stripped)
+            if matches:
+                value = matches[-1]
+                value = value.split(":", 1)[1].strip()
                 # Remove quotes if present
                 if (value.startswith('"') and value.endswith('"')) or \
                    (value.startswith("'") and value.endswith("'")):
@@ -341,14 +365,14 @@ class OllamaModelfileGenerator:
 
     def extract_organization(self, model_url: str) -> str:
         """Extract organization from URL (e.g., "unsloth" from "huggingface.co/unsloth/Qwen3.5-4B-GGUF/...")"""
-        # Match pattern: huggingface.co/{org}/{repo}/...
-        match = re.search(r'huggingface\.co/([^/]+)/([^/]+)/', model_url)
+        # Match pattern: (huggingface.co|hf.co)/{org}/... (org is the first path segment)
+        match = re.search(r'(?:huggingface\.co|hf\.co)/([^/]+)/', model_url)
         if match:
             return match.group(1)
         # Fallback: try to extract from path
         parts = model_url.split("/")
         if len(parts) >= 4:
-            return parts[2][:50]  # Limit to 50 chars
+            return parts[3][:50]  # Limit to 50 chars
         return ""
 
     def extract_model_name(self, model_url: str) -> str:
@@ -359,6 +383,10 @@ class OllamaModelfileGenerator:
         """
         # Get filename without extension
         filename = Path(model_url).name
+        # If the filename contains a '/', there is a trailing directory component
+        # (e.g. .../Qwen/Qwen2.5-32B-Instruct-GGUF/main), so use the parent name instead.
+        if "/" in filename:
+            filename = Path(model_url).parent.name
         model_name = filename.rsplit(".", 1)[0] if "." in filename else filename
         
         # For split models, remove chunk suffix
