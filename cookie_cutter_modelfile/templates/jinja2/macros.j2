@@ -1,0 +1,8 @@
+{% macro render_param(key, value, default=None) %}
+{% if value is not defined or value is none %}
+{% set value = default %}
+{% endif %}
+{% if value != none %}
+PARAMETER {{ key }} {{ value }}
+{% endif %}
+{% endmacro %}

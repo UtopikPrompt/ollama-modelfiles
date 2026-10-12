@@ -1,0 +1,22 @@
+{% extends "base.j2" %}
+{% from "macros.j2" import render_param %}
+
+{{ render_param("model_id", model_id) }}
+
+# Parameters
+{{ render_param("temperature", temperature, "0.7") }}
+{{ render_param("top_p", top_p, "0.9") }}
+{{ render_param("num_predict", context_length, "4096") }}
+{{ render_param("num_threads", num_threads, "4") }}
+
+# Chat model optimizations
+{{ render_param("stop", "<s>") }}
+{{ render_param("stop", "<|eom_id|>") }}
+{{ render_param("stop", "<|eop_id|>") }}
+{{ render_param("stop", "<human>") }}
+{{ render_param("stop", "</ai>") }}
+
+# System prompt (optional)
+{% if system_prompt %}
+{{ render_param("system", system_prompt) }}
+{% endif %}

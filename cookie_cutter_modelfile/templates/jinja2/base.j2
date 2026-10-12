@@ -1,0 +1,7 @@
+FROM {{ model_id }}
+
+# Parameters
+{{ render_param("temperature", temperature, "0.7") }}
+{{ render_param("top_p", top_p, "0.9") }}
+{{ render_param("num_predict", context_length, "4096") }}
+{{ render_param("num_threads", num_threads, "4") }}

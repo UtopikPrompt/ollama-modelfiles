@@ -1,0 +1,21 @@
+{% extends "base.j2" %}
+{% from "macros.j2" import render_param %}
+
+{{ render_param("model_id", model_id) }}
+
+# Parameters
+{{ render_param("temperature", temperature, "0.7") }}
+{{ render_param("top_p", top_p, "0.9") }}
+{{ render_param("num_predict", context_length, "4096") }}
+{{ render_param("num_threads", num_threads, "4") }}
+
+# Completion model optimizations
+{{ render_param("stop", "</summary>
+<|end_of_text|>") }}
+{{ render_param("stop", "</thinking>
+<|end_of_text|>") }}
+{{ render_param("stop", "</analysis>
+<|end_of_text|>") }}
+
+# Increase max tokens for long generation
+{{ render_param("num_ctx", context_length, "4096") }}

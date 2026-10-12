@@ -1,0 +1,105 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cookie-cutter-modelfile"
+version = "0.1.0"
+description = "Generate Ollama Modelfiles from Hugging Face models"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "UtopikPrompt", email = "utopikprompt@example.com"}
+]
+keywords = [
+    "ollama",
+    "modelfile",
+    "huggingface",
+    "llm",
+    "ai",
+    "machine-learning",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/UtopikPrompt/ollama-modelfiles"
+Repository = "https://github.com/UtopikPrompt/ollama-modelfiles"
+Documentation = "https://utopikprompt.github.io/ollama-modelfiles"
+
+[project.scripts]
+cookie-cutter-modelfile = "cookie_cutter_modelfile.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.3",
+    "pytest-cov>=4.1.0",
+    "black>=24.1.0",
+    "isort>=5.13.2",
+    "mypy>=1.8.0",
+    "flake8>=7.0.0",
+    "pre-commit>=3.6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cookie_cutter_modelfile*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+python_version = 3.10
+
+[tool.mypy]
+strict = true
+python_version = "3.10"
+
+[tool.flake8]
+max-line-length = 88
+max-complexity = 10
+max-args = 5
+max-local-variables = 15
+max-return-statements = 12
+max-branches = 12
+max-statement-contexture = 14
+max-nested-decorators = 5
+max-nested-tries = 5
+max-nested-loops = 5
+max-public-methods = 30
+max-private-methods = 50
+max-attributes = 25
+max-lines = 500
+max-lines-per-file = 500
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --cov=cookie_cutter_modelfile --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["cookie_cutter_modelfile"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+    "@overload",
+]

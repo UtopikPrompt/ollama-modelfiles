@@ -1,0 +1,19 @@
+FROM {{ model_id }}
+
+# Parameters
+PARAMETER temperature {{ temperature|default(0.7) }}
+PARAMETER top_p {{ top_p|default(0.9) }}
+PARAMETER num_predict {{ context_length|default(4096) }}
+PARAMETER num_threads {{ num_threads|default(4) }}
+
+# Chat model optimizations
+PARAMETER stop "</s>"
+PARAMETER stop "<|eom_id|>"
+PARAMETER stop "<|eop_id|>"
+PARAMETER stop "</human>"
+PARAMETER stop "</ai>"
+
+# Completion model optimizations
+PARAMETER stop """\n</summary>\n<|end_of_text|>"""
+PARAMETER stop """\n</thinking>\n<|end_of_text|>"""
+PARAMETER stop """\n</analysis>\n<|end_of_text|>"""
