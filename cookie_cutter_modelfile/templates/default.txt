@@ -1,0 +1,9 @@
+# Default Modelfile Template
+
+FROM {{ model_id }}
+
+# Parameters
+PARAMETER temperature {{ temperature|default(0.7) }}
+PARAMETER top_p {{ top_p|default(0.9) }}
+PARAMETER num_predict {{ context_length|default(4096) }}
+PARAMETER num_threads {{ num_threads|default(4) }}

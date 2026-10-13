@@ -8,9 +8,9 @@ customizable templates and parameters.
 __version__ = "0.1.0"
 
 from .cli import main
+from .converter import OllamaConverter
 from .huggingface import HFClient
 from .modelfile import ModelfileGenerator
-from .converter import OllamaConverter
 from .templates import TemplateManager
 
 __all__ = [

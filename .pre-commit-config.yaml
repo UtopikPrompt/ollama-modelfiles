@@ -1,0 +1,21 @@
+post_commit:
+  - always_run: true
+    description: Check git diff for any file changes
+    entry: git diff --cached --quiet
+    name: pre-push
+    pass_filenames: false
+    stages:
+      - push
+repos:
+  - hooks:
+      - id: black
+        language_version: python3.13
+    repo: https://github.com/psf/black
+    rev: 24.4.2
+  - hooks:
+      - additional_dependencies:
+          - pydantic
+        id: isort
+        name: Sort imports
+    repo: https://github.com/pycqa/isort
+    rev: 5.13.2
