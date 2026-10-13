@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import Any, List, Optional
 
 from rich.console import Console
 from rich.table import Table
@@ -33,6 +34,265 @@ class CLI:
         self.template_manager = TemplateManager()
         self.modelfile_generator = ModelfileGenerator()
         self.ollama_converter = OllamaConverter()
+
+    def parse_args(self) -> argparse.Namespace:
+        """Parse command line arguments.
+
+        Returns:
+            Parsed arguments namespace.
+        """
+        # Create a separate top-level parser for --help/-h
+        top_level_parser = argparse.ArgumentParser(
+            prog="cookie-cutter-modelfile",
+            add_help=False,
+        )
+        top_level_parser.add_argument(
+            "-h", "--help", action="help", help="show help message and exit"
+        )
+        top_level_parser.add_argument("command", nargs="=", help="Command to run")
+
+        # Parse with top-level parser to detect --help/-h
+        try:
+            top_level_args = top_level_parser.parse_args(args=sys.argv[1:])
+            # If --help/-h was used, argparse will exit, so we catch it
+            if top_level_args.command is None:
+                top_level_parser.exit()
+        except SystemExit:
+            # --help/-h was used, argparse exits cleanly
+            return None
+
+        # If --help/-h wasn't used, create the subparsers parser
+        self.parser = argparse.ArgumentParser(
+            prog="cookie-cutter-modelfile",
+            description="Generate Ollama Modelfiles from Hugging Face models",
+        )
+        self.subparsers = self.parser.add_subparsers(dest="command", help="Command")
+
+        # Create command parsers
+        create_parser = self.subparsers.add_parser(
+            "create",
+            help="Create a Modelfile from a Hugging Face model",
+        )
+        create_parser.add_argument(
+            "model_id",
+            help="Hugging Face model identifier",
+        )
+        create_parser.add_argument(
+            "--output",
+            "-o",
+            help="Output file path",
+        )
+        create_parser.add_argument(
+            "--template",
+            "-t",
+            help="Template to use",
+            choices=["chat", "completion", "image", "default"],
+        )
+        create_parser.add_argument(
+            "--context-length",
+            "-c",
+            type=int,
+            help="Context window size",
+        )
+        create_parser.add_argument(
+            "--temperature",
+            "-T",
+            type=float,
+            help="Sampling temperature",
+        )
+        create_parser.add_argument(
+            "--top-p",
+            "-P",
+            type=float,
+            help="Top-p sampling",
+        )
+        create_parser.add_argument(
+            "--num-threads",
+            "-n",
+            type=int,
+            help="Number of threads",
+        )
+        create_parser.add_argument(
+            "--num-images",
+            "-i",
+            type=int,
+            help="Number of images",
+        )
+        create_parser.add_argument(
+            "--size",
+            "-s",
+            help="Image size",
+        )
+
+        # Convert command
+        convert_parser = self.subparsers.add_parser(
+            "convert",
+            help="Convert to Ollama format",
+        )
+        convert_parser.add_argument(
+            "model_id",
+            help="Hugging Face model identifier",
+        )
+        convert_parser.add_argument(
+            "--output",
+            "-o",
+            help="Output file path",
+        )
+        convert_parser.add_argument(
+            "--context-length",
+            "-c",
+            type=int,
+            help="Context window size",
+        )
+        convert_parser.add_argument(
+            "--temperature",
+            "-T",
+            type=float,
+            help="Sampling temperature",
+        )
+        convert_parser.add_argument(
+            "--top-p",
+            "-P",
+            type=float,
+            help="Top-p sampling",
+        )
+        convert_parser.add_argument(
+            "--num-threads",
+            "-n",
+            type=int,
+            help="Number of threads",
+        )
+
+        # Deploy command
+        deploy_parser = self.subparsers.add_parser(
+            "deploy",
+            help="Generate Modelfile and add model to Ollama automatically",
+        )
+        deploy_parser.add_argument(
+            "model_id",
+            help="Hugging Face model identifier (or URL)",
+        )
+        deploy_parser.add_argument(
+            "--output",
+            "-o",
+            help="Output file path for Modelfile",
+        )
+        deploy_parser.add_argument(
+            "--context-length",
+            "-c",
+            type=int,
+            help="Context window size",
+        )
+        deploy_parser.add_argument(
+            "--temperature",
+            "-T",
+            type=float,
+            help="Sampling temperature",
+        )
+        deploy_parser.add_argument(
+            "--top-p",
+            "-P",
+            type=float,
+            help="Top-p sampling",
+        )
+        deploy_parser.add_argument(
+            "--num-threads",
+            "-n",
+            type=int,
+            help="Number of threads",
+        )
+
+        # List command
+        list_parser = self.subparsers.add_parser(
+            "list",
+            help="List available models",
+        )
+        list_parser.add_argument(
+            "category",
+            help="Category to filter by",
+        )
+
+        # Search command
+        search_parser = self.subparsers.add_parser(
+            "search",
+            help="Search for models",
+        )
+        search_parser.add_argument(
+            "query",
+            help="Search query",
+        )
+
+        # Template command
+        template_parser = self.subparsers.add_parser(
+            "template",
+            help="Show available templates",
+        )
+
+        # Interactive command
+        interactive_parser = self.subparsers.add_parser(
+            "interactive",
+            help="Interactive wizard mode",
+        )
+
+        return self.parser.parse_args(args=sys.argv[1:])
+
+    def run(self, args: argparse.Namespace) -> int:
+        """Run the CLI with the given arguments.
+
+        Args:
+            args: Command line arguments.
+
+        Returns:
+            Exit code.
+        """
+        if args.command == "create":
+            return self.create(
+                args.model_id,
+                args.output,
+                **{
+                    "context_length": args.context_length,
+                    "temperature": args.temperature,
+                    "top_p": args.top_p,
+                    "num_threads": args.num_threads,
+                    "num_images": args.num_images,
+                    "size": args.size,
+                },
+            )
+        elif args.command == "convert":
+            return self.convert(
+                args.model_id,
+                args.output,
+                **{
+                    "context_length": args.context_length,
+                    "temperature": args.temperature,
+                    "top_p": args.top_p,
+                    "num_threads": args.num_threads,
+                },
+            )
+        elif args.command == "deploy":
+            return self.deploy(
+                args.model_id,
+                args.output,
+                **{
+                    "context_length": args.context_length,
+                    "temperature": args.temperature,
+                    "top_p": args.top_p,
+                    "num_threads": args.num_threads,
+                },
+            )
+        elif args.command == "list":
+            return self.list_models(args.category)
+        elif args.command == "search":
+            return self.search_models(args.query)
+        elif args.command == "template":
+            return self.list_templates()
+        elif args.command == "interactive":
+            return self.interactive()
+        elif args.command == "--help" or args.command is None:
+            return self.show_help()
+        else:
+            self.parser.print_help()
+            return 1
 
     def _parse_model_id(self, model_id: str) -> Optional[str]:
         """Parse and normalize a model ID, handling URLs.
@@ -1189,7 +1449,6 @@ AUTO-GENERATED MODEL NAMES:
                     "size": args.size,
                 },
             )
-
         elif args.command == "convert":
             return self.convert(
                 args.model_id,
@@ -1201,22 +1460,27 @@ AUTO-GENERATED MODEL NAMES:
                     "num_threads": args.num_threads,
                 },
             )
-
+        elif args.command == "deploy":
+            return self.deploy(
+                args.model_id,
+                args.output,
+                **{
+                    "context_length": args.context_length,
+                    "temperature": args.temperature,
+                    "top_p": args.top_p,
+                    "num_threads": args.num_threads,
+                },
+            )
         elif args.command == "list":
             return self.list_models(args.category)
-
         elif args.command == "search":
             return self.search_models(args.query)
-
         elif args.command == "template":
             return self.list_templates()
-
         elif args.command == "interactive":
             return self.interactive()
-
         elif args.command == "--help" or args.command is None:
             return self.show_help()
-
         else:
             parser.print_help()
             return 1
@@ -1230,53 +1494,7 @@ def main() -> int:
     """
     cli = CLI()
 
-    args = cli.parse_args()
-
-    if args.command == "create":
-        return cli.create(
-            args.model_id,
-            args.output,
-            **{
-                "context_length": args.context_length,
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-                "num_threads": args.num_threads,
-                "num_images": args.num_images,
-                "size": args.size,
-            },
-        )
-    elif args.command == "convert":
-        return cli.convert(
-            args.model_id,
-            args.output,
-            **{
-                "context_length": args.context_length,
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-                "num_threads": args.num_threads,
-            },
-        )
-    elif args.command == "deploy":
-        return cli.deploy(
-            args.model_id,
-            args.output,
-            **{
-                "context_length": args.context_length,
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-                "num_threads": args.num_threads,
-            },
-        )
-    elif args.command == "list":
-        return cli.list_models(args.category)
-    elif args.command == "search":
-        return cli.search_models(args.query)
-    elif args.command == "template":
-        return cli.list_templates()
-    elif args.command == "interactive":
-        return cli.interactive()
-    else:
-        return cli.show_help()
+    return cli.run(cli.parse_args())
 
 
 if __name__ == "__main__":
