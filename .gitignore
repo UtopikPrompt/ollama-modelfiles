@@ -7,7 +7,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
-downloads/
+models/
 eggs/
 .eggs/
 lib/
@@ -119,6 +119,7 @@ Thumbs.db
 
 # Ollama
 .ollama/
+.ollama-creates/
 models/
 
 # HF cache
@@ -424,3 +425,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+models/
+modelfiles/

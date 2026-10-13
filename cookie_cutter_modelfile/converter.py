@@ -4,9 +4,12 @@ Ollama model converter.
 
 from __future__ import annotations
 
+import sys
 from typing import Any, Dict, List, Optional
 
 from rich.console import Console
+
+from .modelfile import ModelfileGenerator
 
 
 class OllamaConverter:
@@ -14,7 +17,7 @@ class OllamaConverter:
 
     def __init__(self):
         """Initialize the Ollama converter."""
-        self.console = Console()
+        self.console = Console(file=sys.stdout)
 
     def convert_to_ollama(
         self, model_id: str, context_length: int, params: Dict[str, Any]
@@ -40,11 +43,27 @@ class OllamaConverter:
             )
             model_info = self._fetch_from_model_card(model_id)
 
+        # Convert ModelInfo object to a plain dict for JSON serialization
+        # and to keep the converter methods working with dict-style access.
+        if hasattr(model_info, "base_models"):
+            # ModelInfo proto object (from fetch_model)
+            info_dict = {
+                "id": model_info.id,
+                "name": getattr(model_info, "name", model_info.id),
+                "author": getattr(model_info, "author", ""),
+                "tags": list(model_info.tags),
+            }
+            if model_info.base_models is not None:
+                info_dict["base_models"] = list(model_info.base_models)
+        else:
+            # Already a plain dict (e.g. from _fetch_from_model_card)
+            info_dict = model_info
+
         # Build the model definition
         model_def = {
-            "name": self._get_name(model_info),
+            "name": self._get_name(info_dict),
             "modelfile": self._get_modelfile(model_id, context_length, params),
-            "parameters": self._get_parameters(model_info, params),
+            "parameters": self._get_parameters(info_dict, params),
         }
 
         return self._format_json(model_def)

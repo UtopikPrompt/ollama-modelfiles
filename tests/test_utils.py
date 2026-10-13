@@ -195,6 +195,20 @@ class TestParseHuggingfaceUrl:
             == "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
         )
 
+    def test_tree_url(self):
+        """Test parsing /tree/ URL (Git LFS-style browser URL)."""
+        url = "https://huggingface.co/UtopikPrompt/Ornith-1.5-9B-uncensored-GGUF/tree/main/Ornith-1.5-9B-uncensored.Q3_K_L.gguf"
+        assert (
+            parse_huggingface_url(url) == "UtopikPrompt/Ornith-1.5-9B-uncensored-GGUF"
+        )
+
+    def test_blob_url(self):
+        """Test parsing /blob/ URL (raw file browser URL)."""
+        url = "https://huggingface.co/UtopikPrompt/Ornith-1.5-9B-uncensored-GGUF/blob/main/Ornith-1.5-9B-uncensored.Q3_K_L.gguf"
+        assert (
+            parse_huggingface_url(url) == "UtopikPrompt/Ornith-1.5-9B-uncensored-GGUF"
+        )
+
     def test_empty_input(self):
         """Test empty input."""
         assert parse_huggingface_url("") is None

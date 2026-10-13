@@ -83,10 +83,6 @@ class TemplateManager:
             Rendered template string.
         """
         try:
-            # If template is already rendered, return it as-is
-            if "\n" not in template or "FROM " in template and "PARAMETER" in template:
-                return template
-
             # Create a new environment with the same configuration for rendering
             # This allows macros to be resolved properly
             render_env = SandboxedEnvironment(

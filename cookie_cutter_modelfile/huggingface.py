@@ -4,18 +4,79 @@ Hugging Face Hub client for fetching model information.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
-from huggingface_hub import HfApi, ModelCard, ModelInfo, list_models, model_info
+from dotenv import load_dotenv
+from huggingface_hub import (
+    HfApi,
+    ModelCard,
+    ModelInfo,
+    hf_hub_download,
+    list_models,
+    model_info,
+)
 
 
 class HFClient:
     """Client for interacting with Hugging Face Hub API."""
 
-    def __init__(self):
-        """Initialize the Hugging Face client."""
-        self.api = HfApi()
+    def __init__(self, token: Optional[str] = None):
+        """Initialize the Hugging Face client.
+
+        A Hugging Face token is resolved from the following sources in order
+        of precedence (the first non-empty value wins):
+
+        1. An explicit ``token`` passed to this constructor.
+        2. The ``HF_TOKEN`` environment variable.
+        3. A ``HF_TOKEN`` entry in a ``.env`` file in the current working
+           directory (loaded via :mod:`dotenv`).
+
+        Args:
+            token: Optional explicit Hugging Face token. When provided it takes
+                precedence over environment and file-based sources.
+
+        Returns:
+            None. The resolved token is stored on ``self._hf_token`` and passed
+            to :class:`huggingface_hub.HfApi`.
+        """
+        self._hf_token = self._resolve_token(token)
+        self.api = HfApi(token=self._hf_token)
         self._hf_api = self.api  # Internal API for testing
+
+    @staticmethod
+    def _resolve_token(
+        token: Optional[str],
+    ) -> Optional[str]:
+        """Resolve the Hugging Face token from the configured sources.
+
+        Precedence: explicit token > ``HF_TOKEN`` env var > ``.env`` file.
+
+        Args:
+            token: Optional explicit token provided by the caller.
+
+        Returns:
+            The first non-empty token found, or ``None`` if no token was found.
+        """
+        # 1. Explicit token takes precedence over everything else.
+        if token:
+            return token
+
+        # 2. Environment variable.
+        env_token = os.environ.get("HF_TOKEN")
+        if env_token:
+            return env_token
+
+        # 3. .env file in the current working directory.
+        # ``load_dotenv`` does not override variables already set in the
+        # environment, so an ``HF_TOKEN`` env var (checked above) always wins
+        # over the same key in the ``.env`` file.
+        load_dotenv()
+        file_token = os.environ.get("HF_TOKEN")
+        if file_token:
+            return file_token
+
+        return None
 
     def fetch_model(self, model_id: str) -> Optional[ModelInfo]:
         """Fetch model metadata from Hugging Face.
@@ -73,6 +134,34 @@ class HFClient:
         except Exception as e:
             print(f"Error searching models: {e}")
             return []
+
+    def download_gguf(
+        self, model_id: str, filename: str, local_dir: Optional[str] = None
+    ) -> Optional[str]:
+        """Download a GGUF file from Hugging Face to a local cache.
+
+        Args:
+            model_id: The Hugging Face model identifier.
+            filename: The filename of the GGUF file to download.
+            local_dir: Optional local directory to download into. Defaults to
+                a gitignored ``./models/`` folder inside the current
+                working directory so downloaded models stay out of git.
+
+        Returns:
+            Absolute path to the downloaded GGUF file, or None on failure.
+        """
+        if local_dir is None:
+            local_dir = os.path.join(os.getcwd(), "models")
+        try:
+            return hf_hub_download(
+                repo_id=model_id,
+                filename=filename,
+                repo_type="model",
+                local_dir=local_dir,
+            )
+        except Exception as e:
+            print(f"Error downloading {filename} from {model_id}: {e}")
+            return None
 
     def get_model_info(self, model_id: str) -> Dict[str, Any]:
         """Get detailed model information.

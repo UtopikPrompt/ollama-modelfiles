@@ -26,15 +26,15 @@ class TestModelfileGenerator:
             {
                 "temperature": 0.7,
                 "top_p": 0.9,
-                "num_threads": 4,
+                "num_thread": 4,
             },
         )
 
         assert "FROM test/model" in content
         assert "PARAMETER temperature 0.7" in content
         assert "PARAMETER top_p 0.9" in content
-        assert "PARAMETER num_predict 4096" in content
-        assert "PARAMETER num_threads 4" in content
+        assert "PARAMETER num_ctx 4096" in content
+        assert "PARAMETER num_thread 4" in content
 
         # Validate the generated content
         assert generator.validate_modelfile(content) is True
@@ -47,13 +47,14 @@ class TestModelfileGenerator:
             {
                 "temperature": 0.8,
                 "top_p": 0.85,
-                "num_threads": 8,
+                "num_thread": 8,
             },
         )
 
         assert "PARAMETER temperature 0.8" in content
         assert "PARAMETER top_p 0.85" in content
-        assert "PARAMETER num_predict 8192" in content
+        assert "PARAMETER num_ctx 8192" in content
+        assert "PARAMETER num_gpu -1" in content
 
     def test_validate_valid_modelfile(self, generator):
         """Test validation of a valid Modelfile."""

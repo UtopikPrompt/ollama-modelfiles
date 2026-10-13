@@ -1,0 +1,25 @@
+# cookie-cutter-modelfile Ollama configuration
+#
+# This file configures the Ollama server URL and the list of available
+# hardware profiles. The tool reads it from the project root by default
+# (config.yml). Override the location with the OLLAMA_CONFIG env var.
+#
+# You can also set the Ollama URL directly in your .env file as OLLAMA_URL
+# (or OLLAMA_HOST) - it takes precedence over the value below.
+
+# Ollama server connection settings
+ollama:
+  # Base URL for the Ollama API. Overrides are allowed via OLLAMA_URL / OLLAMA_HOST.
+  url: http://localhost:11434
+
+# Hardware profiles. Pick one with --hardware, or set "default" below.
+hardware:
+  default: rtx-3080
+  profiles:
+    rtx-3080:
+      name: RTX 3080 10GB
+      description: NVIDIA RTX 3080 - 10GB VRAM
+      devices: ["GPU:0"]
+      num_threads: 0 # 0 = auto-detect optimal thread count
+      gpu_layers: -1 # -1 = auto-detect layers to run on GPU
+      vram: 10564246528 # ~10GB in bytes

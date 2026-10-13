@@ -4,6 +4,7 @@ Modelfile generation and validation.
 
 from __future__ import annotations
 
+import sys
 from typing import Any, Dict, List, Optional
 
 from rich.console import Console
@@ -14,7 +15,7 @@ class ModelfileGenerator:
 
     def __init__(self):
         """Initialize the Modelfile generator."""
-        self.console = Console()
+        self.console = Console(file=sys.stdout)
 
     def generate(
         self, model_id: str, context_length: int, params: Dict[str, Any]
@@ -24,7 +25,7 @@ class ModelfileGenerator:
         Args:
             model_id: The Hugging Face model identifier.
             context_length: The context window size in tokens.
-            params: Dictionary of parameters (temperature, top_p, num_threads, etc.).
+            params: Dictionary of parameters (temperature, top_p, num_thread, etc.).
 
         Returns:
             Generated Modelfile content.
@@ -47,7 +48,8 @@ class ModelfileGenerator:
             "temperature": params.get("temperature", 0.7),
             "top_p": params.get("top_p", 0.9),
             "context_length": context_length,
-            "num_threads": params.get("num_threads", 4),
+            "num_thread": params.get("num_thread", 4),
+            "num_gpu": params.get("num_gpu", -1),
         }
 
         content = template_manager.render(template, context)
@@ -72,8 +74,9 @@ class ModelfileGenerator:
             "# Parameters",
             f"PARAMETER temperature {params.get('temperature', 0.7)}",
             f"PARAMETER top_p {params.get('top_p', 0.9)}",
-            f"PARAMETER num_predict {context_length}",
-            f"PARAMETER num_threads {params.get('num_threads', 4)}",
+            f"PARAMETER num_ctx {context_length}",
+            f"PARAMETER num_thread {params.get('num_thread', 4)}",
+            f"PARAMETER num_gpu {params.get('num_gpu', -1)}",
         ]
         return "\n".join(lines)
 
@@ -116,11 +119,14 @@ class ModelfileGenerator:
         for line in lines:
             stripped = line.strip()
             if stripped.upper().startswith("PARAMETER "):
-                parts = stripped.split(None, 1)
-                if len(parts) < 2:
+                parts = stripped.split(None, 2)
+                if len(parts) < 3:
                     param_errors.append(f"Invalid PARAMETER line: {stripped}")
                 else:
-                    param_name, param_value = parts
+                    # The keyword (PARAMETER) is parts[0]; the parameter name
+                    # is parts[1] and its value is parts[2] (values may contain
+                    # spaces, e.g. a multi-word stop string).
+                    param_name, param_value = parts[1], parts[2]
                     # Validate parameter values
                     valid_values = ["true", "false", "0", "1"]
                     if param_value not in valid_values:

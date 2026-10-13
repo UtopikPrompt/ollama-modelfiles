@@ -5,7 +5,8 @@ Utility functions for the cookie cutter modelfile tool.
 from __future__ import annotations
 
 import re
-from typing import Optional
+import sys
+from typing import Any, Optional
 
 from rich.console import Console
 from rich.text import Text
@@ -43,11 +44,14 @@ def parse_huggingface_url(url: str) -> Optional[str]:
         # Remove query parameters if present
         if "?" in full_path:
             full_path = full_path.split("?")[0]
-        # Extract only the model ID (everything up to /resolve)
-        if "/resolve" in full_path:
-            # For resolve URLs: /model-id/resolve/... -> model-id
-            return full_path.split("/resolve")[0]
-        return full_path
+        # Strip known sub-path segments (repo tree/blob/resolve views and
+        # any trailing path after the repo ID, e.g. /tree/main).
+        for segment in ("/resolve", "/tree", "/blob"):
+            if segment in full_path:
+                full_path = full_path.split(segment)[0]
+        # The repo ID is the first two path segments (namespace/repo_name).
+        parts = full_path.split("/")
+        return "/".join(parts[:2])
 
     return None
 
@@ -115,11 +119,39 @@ def format_context_length(length: int) -> str:
     return str(length)
 
 
-def get_model_info_display(model_info: dict) -> Text:
+def _model_info_field(model_info: Any, field: str, default: Any = None) -> Any:
+    """Read a field from a model info source.
+
+    Supports both a plain ``dict`` (accessed via ``.get``) and a
+    ``huggingface_hub.ModelInfo`` object (accessed via attributes).
+
+    Args:
+        model_info: Either a dict of model metadata or a ModelInfo object.
+        field: The name of the field to read.
+        default: Value to return if the field is missing or empty.
+
+    Returns:
+        The field value or ``default``.
+    """
+    if model_info is None:
+        return default
+
+    # dict-like access (e.g. get_model_info)
+    if hasattr(model_info, "get"):
+        value = model_info.get(field, default)
+        return value if value is not None else default
+
+    # attribute access (e.g. ModelInfo object)
+    value = getattr(model_info, field, default)
+    return value if value is not None else default
+
+
+def get_model_info_display(model_info: Any) -> Text:
     """Create a formatted text display of model information.
 
     Args:
-        model_info: Dictionary containing model metadata.
+        model_info: Either a dict or a ``huggingface_hub.ModelInfo`` object
+            containing model metadata.
 
     Returns:
         A rich Text object with formatted model information.
@@ -129,31 +161,31 @@ def get_model_info_display(model_info: dict) -> Text:
     text.append("Model Information\n", style="bold cyan")
 
     # ID
-    model_id = model_info.get("id", "Unknown")
+    model_id = _model_info_field(model_info, "id", "Unknown")
     text.append(f"\nID: ", style="dim")
     text.append(model_id, style="cyan")
 
     # Name
-    name = model_info.get("name", "")
+    name = _model_info_field(model_info, "name", "")
     text.append(f"\nName: ", style="dim")
     text.append(name, style="green")
 
     # Description
-    description = model_info.get("description", "")
+    description = _model_info_field(model_info, "description", "")
     if description:
         text.append(f"\nDescription:\n", style="dim")
-        text.append(description[:200], style="dim gray")
-        if len(description) > 200:
+        text.append(str(description)[:200], style="dim gray")
+        if len(str(description)) > 200:
             text.append("...", style="dim")
 
     # Library
-    library = model_info.get("library", "")
+    library = _model_info_field(model_info, "library", "")
     if library:
         text.append(f"\nLibrary: ", style="dim")
         text.append(library, style="magenta")
 
     # Tags
-    tags = model_info.get("tags", [])
+    tags = _model_info_field(model_info, "tags", [])
     if tags:
         tag_str = ", ".join(tags[:5])
         if len(tags) > 5:
@@ -171,7 +203,7 @@ def print_error(message: str, error: Optional[Exception] = None) -> None:
         message: The error message to display.
         error: The exception object (optional).
     """
-    console = Console()
+    console = Console(file=sys.stdout)
 
     if error:
         console.print(f"\n❌ Error: {message}", style="bold red")

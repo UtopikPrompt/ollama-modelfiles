@@ -34,8 +34,8 @@ class TestTemplateManager:
         assert "FROM " in template
         assert "PARAMETER temperature" in template
         assert "PARAMETER top_p" in template
-        assert "PARAMETER num_predict" in template
-        assert "PARAMETER num_threads" in template
+        assert "PARAMETER num_ctx" in template
+        assert "PARAMETER num_thread" in template
 
     def test_render_template(self, template_manager):
         """Test template rendering."""

@@ -9,7 +9,9 @@ Complete user guide for the cookie cutter modelfile creation tool.
 3. [Quick Start](#quick-start)
 4. [Creating Modelfiles](#creating-modelfiles)
 5. [Command Reference](#command-reference)
-6. [Advanced Features](#advanced-features)
+6. [Configuration](#configuration)
+7. [Authentication](#authentication)
+8. [Advanced Features](#advanced-features)
 7. [Troubleshooting](#troubleshooting)
 8. [Best Practices](#best-practices)
 
@@ -160,6 +162,7 @@ Optional Arguments:
   --temperature <FLOAT>  Default temperature (default: 0.7)
   --top-p <FLOAT>        Default top_p (default: 0.9)
   --top-k <INT>          Default top_k (default: 40)
+  --hardware <NAME>      Hardware profile name (see [Configuration](#configuration))
 
 Examples:
   # Create basic modelfile
@@ -170,6 +173,11 @@ Examples:
     --model "meta-llama/Meta-Llama-3-8B-Instruct" \
     --temperature 0.7 \
     --output modelfile.txt
+  
+  # Create with a custom hardware profile
+  cookie-cutter-modelfile create \
+    --model "meta-llama/Meta-Llama-3-8B-Instruct" \
+    --hardware cpu-only
 ```
 
 ### `convert` - Convert to Ollama Model
@@ -218,6 +226,145 @@ Examples:
 ```bash
 cookie-cutter-modelfile interactive
 ```
+
+---
+
+## Authentication
+
+The Hugging Face client (`HFClient`) authenticates against the Hugging Face Hub
+using a `HF_TOKEN`. This token is resolved automatically, in the following order
+of precedence (the first non-empty value wins):
+
+1. **Explicit token** — an `HF_TOKEN` value passed programmatically to the
+   client (or a flag accepted by the CLI).
+2. **Environment variable** — the `HF_TOKEN` environment variable.
+3. **`.env` file** — an `HF_TOKEN` entry in a `.env` file located in the current
+   working directory.
+
+If none of these sources provide a token, the client is created without a token
+and lets `huggingface_hub` handle the "no token" behavior (public models only).
+
+### Create a `.env` file
+
+Storing your token in a `.env` file is convenient because it is picked up
+automatically whenever the tool is run from that directory, without needing to
+export an environment variable or run `huggingface-cli login`.
+
+```bash
+# Create a .env file in your project directory
+HF_TOKEN="your_huggingface_token"
+```
+
+You can create the file with your editor or any `.env` helper:
+
+```bash
+# Using python-dotenv (if installed)
+python -c "from dotenv import load_dotenv; load_dotenv('.env')"
+
+# Or with a simple here-doc
+cat > .env <<'EOF'
+HF_TOKEN="your_huggingface_token"
+EOF
+```
+
+### Using an environment variable
+
+Alternatively, export the token in your shell session:
+
+```bash
+# Windows (PowerShell)
+$env:HF_TOKEN="your_huggingface_token"
+
+# macOS / Linux
+export HF_TOKEN="your_huggingface_token"
+```
+
+### Where to get a token
+
+Create a token on the [Hugging Face settings page](https://huggingface.co/settings/tokens),
+then copy the access token. Use a token with at least read/write permissions for
+the models you intend to access.
+
+---
+
+## Configuration
+
+This tool reads a configuration file (default: `config.yml`) that lets
+you set the **Ollama server URL** and the **hardware profiles** used to
+automatically calculate `num_thread` / `num_gpu_layers` for the generated
+Modelfile.
+
+### The configuration file
+
+```yaml
+# config.yml
+ollama:
+  url: http://localhost:11434   # Ollama server URL
+
+hardware:
+  default: workstation-gpu       # hardware profile applied by default
+  profiles:
+    workstation-gpu:
+      devices: ["GPU:0"]
+      num_threads: 0             # 0 = auto-detect from CPU count
+      gpu_layers: -1             # -1 = auto-detect layers
+    cpu-only:
+      devices: ["CPU"]
+      num_threads: 8
+      gpu_layers: 0
+```
+
+#### Ollama URL
+
+Set the Ollama server URL so the tool invokes `ollama --host <url>` when the
+value differs from the default `http://localhost:11434`.
+
+You can set it in three ways (precedence from highest to lowest):
+
+1. **Configuration file** — the `ollama.url` key (or the `OLLAMA_URL` /
+   `OLLAMA_HOST` environment variable).
+2. **Environment variable** — `OLLAMA_URL` or `OLLAMA_HOST`.
+3. **Default** — `http://localhost:11434`.
+
+### Ollama URL via `.env`
+
+You can store the Ollama URL in a `.env` file, in the same place as your
+`HF_TOKEN`. The `.env` file is loaded automatically whenever the tool runs from
+that directory, so you don't need to export an environment variable:
+
+```bash
+# .env
+HF_TOKEN="your_huggingface_token"
+OLLAMA_URL="http://localhost:11434"
+# OLLAMA_HOST="ollama.example.com"   # alternative to OLLAMA_URL
+```
+
+> **Note:** An environment variable (`OLLAMA_URL` / `OLLAMA_HOST`) always wins
+> over the same key in the `.env` file, because `python-dotenv` never overrides an
+> existing environment variable.
+
+### Hardware profiles
+
+A **hardware profile** describes the machine that runs the model. It is applied
+automatically whenever the tool generates a Modelfile, and it sets two
+`PARAMETER` lines:
+
+| Parameter | Purpose |
+|-----------|---------|
+| `num_thread` | Number of CPU threads used for inference. |
+| `num_gpu_layers` | Number of model layers offloaded to the GPU. `-1` = auto-detect. |
+
+Use the `--hardware` flag to override the default profile for a single command:
+
+```bash
+# Use the CPU-only profile for this command
+cookie-cutter-modelfile create \
+  --model "huggingface-cli/clip-base-float16" \
+  --hardware cpu-only
+```
+
+The default profile can also be changed in the configuration file
+(`hardware.default`), or overridden per-command with `--hardware`.
 
 ---
 

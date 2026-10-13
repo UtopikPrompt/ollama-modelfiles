@@ -85,7 +85,7 @@ class TestOllamaConverter:
             {
                 "temperature": 0.8,
                 "top_p": 0.95,
-                "num_threads": 8,
+                "num_thread": 8,
             },
         )
 
@@ -104,8 +104,8 @@ class TestOllamaConverter:
         assert "4096" in modelfile
         assert "PARAMETER temperature" in modelfile
         assert "PARAMETER top_p" in modelfile
-        assert "PARAMETER num_predict" in modelfile
-        assert "PARAMETER num_threads" in modelfile
+        assert "PARAMETER num_ctx" in modelfile
+        assert "PARAMETER num_thread" in modelfile
 
     def test_get_parameters(self, converter):
         """Test getting model parameters."""
