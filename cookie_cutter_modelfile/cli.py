@@ -5,16 +5,25 @@ Command-line interface for the cookie cutter modelfile tool.
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
+import re
+import subprocess
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional, Sequence
 
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from .config import load_config, print_config
-from .context import VRAM_RESERVE, estimate_context, format_context
+from .config import Config, load_config, print_config
+from .context import (
+    EXACT_QUANT_BPT,
+    VRAM_RESERVE,
+    estimate_context,
+    format_context,
+    vram_windows_overhead,
+)
 from .converter import OllamaConverter
 from .huggingface import HFClient
 from .modelfile import ModelfileGenerator
@@ -33,9 +42,78 @@ OLLAMA_CREATE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "modelfiles"
 )
 
+# Regex shared by both URL-parsing helpers (matches /resolve|tree|blob/ path).
+GGUF_URL_RE = re.compile(r"/(?:resolve|tree|blob)/[^/]+/([^/]+)\.gguf(?![a-zA-Z0-9_-])")
+
+# GGUF quant tags that count as an explicit quant suffix (case-insensitive).
+QUANT_TAGS = (
+    "f16",
+    "q2_k",
+    "q2_x",
+    "q3_k_s",
+    "q3_k_m",
+    "q3_k_l",
+    "q4_k_m",
+    "q4_k_s",
+    "q4_k_l",
+    "q4_0",
+    "q4_1",
+    "q5_k_m",
+    "q5_k_s",
+    "q5_k_l",
+    "q5_i",
+    "q6_k",
+    "q8_0",
+    "iq1",
+    "iq3",
+    "iq4_xs",
+)
+
+# Preferred quantizations (best -> worst), shared by _best_quant and _available_quants.
+QUANT_ORDER = (
+    "f16",
+    "q8_0",
+    "q6_k",
+    "q5_k_m",
+    "q5_k_s",
+    "q4_k_m",
+    "q4_k_s",
+    "q3_k_l",
+    "q3_k_m",
+    "q3_k_s",
+    "iq4_xs",
+    "q2_k",
+)
+
+# Disk-footprint guess (GB) per quant, shared by _best_quant.
+QUANT_SIZE_GUESS = {
+    "f16": 17.9,
+    "q8_0": 9.5,
+    "q6_k": 7.4,
+    "q5_k_m": 6.5,
+    "q5_k_s": 6.3,
+    "q4_k_m": 5.6,
+    "q4_k_s": 5.4,
+    "q3_k_l": 4.9,
+    "q3_k_m": 4.6,
+    "q3_k_s": 4.3,
+    "iq4_xs": 5.2,
+    "q2_k": 3.8,
+}
+
 
 class CLI:
     """Command-line interface for the modelfile tool."""
+
+    def _gguf_match(self, url: str) -> Optional[re.Match[str]]:
+        """Run the shared GGUF-URL regex once and return the match (or None).
+
+        Used by both _extract_quant_from_url and _extract_gguf_filename_from_url
+        so the regex is compiled and applied a single time per URL.
+        """
+        if not url:
+            return None
+        return GGUF_URL_RE.search(url)
 
     def __init__(self):
         """Initialize the CLI."""
@@ -401,22 +479,106 @@ class CLI:
         if not url:
             return None
         # Match the GGUF filename in the /resolve/<ref>/<filename> path (also
-        # covers /tree/<ref>/ and /blob/<ref>/ browser URLs). We preserve the
-        # original case of the filename's quant tag for Hugging Face.
-        import re
-
-        match = re.search(r"/(?:resolve|tree|blob)/[^/]+/([^/]+)\.gguf", url)
+        # covers /tree/<ref>/ and /blob/<ref>/ browser URLs. The captured group
+        # is the filename *without* ``.gguf``, preserving the original case of
+        # the quant tag (HF is case-sensitive).
+        match = self._gguf_match(url)
         if match:
+            # A suffix counts as an explicit quant only when it is a recognized
+            # GGUF quantization tag. Accept ``f16`` or any suffix beginning with
+            # ``q`` / ``iq`` (e.g. ``q4_0``, ``q4_k_m``, ``iq4_xs``); anything
+            # else (e.g. the ``i1`` in ``...OBLITERATED-i1``) is a model-name
+            # component, so we return None and the deployer prompts for a quant
+            # instead of trying to download a non-existent file.
             filename = match.group(1)  # e.g. "Ornith-1.5-9B-uncensored.Q3_K_L"
-            # A quant tag is a distinct component of the filename: the part
-            # after the final dot. "ornith.gguf" has no quant (stem has no
-            # dot) -> return None so the deployer picks a quant normally.
-            # "ornith.Q3_K_L.gguf" -> quant "Q3_K_L". Return only that tag,
-            # preserving its original case (HF is case-sensitive).
-            if "." in filename:
-                return filename.rsplit(".", 1)[-1]
-            return None
+            # The regex already stripped ``.gguf``, so the filename *is* the
+            # stem; it may still contain dots (e.g. ``1.5`` in
+            # ``Cyber-Ornith-1.5-9B``), which is why the quant tag is matched as
+            # a *suffix* of a known tag rather than by dot position. A bare
+            # name (``ornith.gguf`` -> stem ``ornith``) has no quant.
+            stem = filename
+            if "." not in stem:
+                # No dot in the stem -> no quant tag -> deployer picks a quant.
+                return None
+            last_component = stem.rsplit(".", 1)[-1]
+            # A real quant tag *ends with* a recognized GGUF quant tag
+            # (case-insensitive). Matching against the known tag set — rather
+            # than a ``q*``/``iq*`` prefix — is robust to model-name dots
+            # (``1.5``) and non-quant suffixes (``i1``, bare model names). The
+            # original case of the matched tag is preserved (HF is
+            # case-sensitive).
+            KNOWN_QUANT_TAGS = (
+                "f16",
+                "q2_k",
+                "q2_x",
+                "q3_k_s",
+                "q3_k_m",
+                "q3_k_l",
+                "q4_k_m",
+                "q4_k_s",
+                "q4_k_l",
+                "q4_0",
+                "q4_1",
+                "q5_k_m",
+                "q5_k_s",
+                "q5_k_l",
+                "q5_i",
+                "q6_k",
+                "q8_0",
+                "iq1",
+                "iq3",
+                "iq4_xs",
+            )
+            lowered = last_component.lower()
+            quant_component = None
+            for tag in KNOWN_QUANT_TAGS:
+                if lowered.endswith(tag):
+                    quant_component = last_component[-len(tag) :]
+                    break
+            return quant_component
         return None
+
+    def _gguf_match(self, url: str) -> Optional[re.Match]:
+        """Shared GGUF-URL matcher for ``_extract_quant_from_url`` and
+        ``_extract_gguf_filename_from_url``.
+
+        Captures the ``/resolve|tree|blob/<ref>/<filename>`` stem (without
+        ``.gguf``), preserving original case. A ``?download=true`` query
+        string is not a path segment, so the trailing ``(?![a-zA-Z0-9_-])``
+        guard keeps it out.
+        """
+        return re.search(
+            r"/(?:resolve|tree|blob)/[^/]+/([^/]+)\.gguf(?![a-zA-Z0-9_-])", url
+        )
+
+    def _extract_gguf_filename_from_url(self, url: str) -> Optional[str]:
+        """Extract the full GGUF filename (without ``.gguf``) from a raw Hugging Face URL.
+
+        Parses the ``/resolve/<ref>/<filename>`` (also ``/tree/`` / ``/blob/``)
+        segment, e.g. ``...OBLITERATED-i1-Q4_K_M.gguf`` ->
+        ``OBLITERATED-i1-Q4_K_M``. This must be done before ``_parse_model_id``
+        normalizes the URL, which discards the GGUF filename entirely.
+
+        The returned stem preserves the original case *and* the original
+        separator between the model name and the quant tag (a dash in
+        ``i1-Q4_K_M``, not a dot). It is used verbatim when a quant is
+        explicitly requested from the URL so the downloaded file matches the
+        real Hugging Face file exactly.
+
+        Args:
+            url: The raw Hugging Face URL (may contain a /resolve/main/ path).
+
+        Returns:
+            The GGUF filename stem (without ``.gguf``), or None if the URL has
+            no GGUF filename.
+        """
+        if not url:
+            return None
+        # Same pattern as _extract_quant_from_url: capture the filename segment
+        # before ".gguf" and never follow it with another name character (a
+        # "?download=true" query string is not a path segment).
+        match = self._gguf_match(url)
+        return match.group(1) if match else None
 
     def _parse_model_id(self, model_id: str) -> Optional[str]:
         """Parse and normalize a model ID, handling URLs.
@@ -481,15 +643,8 @@ class CLI:
 
         # Save to file
         if output:
-            success = self.modelfile_generator.save(modelfile_content, output)
-            if not success:
-                print_error("Failed to save Modelfile")
-                return 1
+            self._save_output(modelfile_content, output, "Modelfile")
 
-            self.console.print(
-                "[bold green]Modelfile generated successfully![/bold green]"
-            )
-            self.console.print(f"   Saved to: {output}")
         else:
             # Display in terminal
             self.console.print("\n[bold]Modelfile content:[/bold]")
@@ -515,7 +670,11 @@ class CLI:
         return 0
 
     def _requested_gguf_filename(
-        self, model_id: str, requested_quant: Optional[str], best: Optional[str] = None
+        self,
+        model_id: str,
+        requested_quant: Optional[str],
+        best: Optional[str] = None,
+        original_filename: Optional[str] = None,
     ) -> str:
         """Build the GGUF filename to download based on the requested quant.
 
@@ -527,6 +686,11 @@ class CLI:
             requested_quant: Optional quantization tag requested in the URL
                 (e.g. ``q3_k_m``).
             best: Optional VRAM-derived quantization (legacy fallback).
+            original_filename: The exact GGUF filename stem (without ``.gguf``)
+                captured from the original URL, e.g. ``OBLITERATED-i1-Q4_K_M``.
+                When present it is preserved verbatim so the separator between
+                the model name and the quant tag (a dash in ``i1-Q4_K_M``, not
+                a dot) matches the real Hugging Face file.
 
         Returns:
             The GGUF filename (e.g. ``Ornith-1.5-9B-uncensored.Q3_K_M.gguf``).
@@ -537,15 +701,17 @@ class CLI:
         # quant first). Fall back to the full derivation only when no quant is
         # requested.
         if requested_quant:
+            # Preserve the exact filename from the original URL when available
+            # so the separator (dash vs dot) between the model name and the
+            # quant tag is retained (e.g. Cyber-Ornith-1.5-9B-OBLITERATED-i1-Q4_K_M).
+            if original_filename:
+                return f"{original_filename}.gguf"
             base = self._repo_base_name(model_id, best)
             return f"{base}.{requested_quant}.gguf"
         return self._derive_gguf_filename(model_id, best)
 
     def _available_quants(self, model_id: str) -> list:
         """List quantizations available in the repo, sorted by preference.
-
-        Args:
-            model_id: The normalized Hugging Face model identifier.
 
         Returns:
             A list of quantization tags (e.g. ``[q4_k_m, q3_k_m]``).
@@ -620,15 +786,11 @@ class CLI:
         return self._custom_quant(available)
 
     def _custom_quant(self, available: list) -> Optional[str]:
-        """Prompt the user for a custom quantization string.
-
-        Args:
-            available: Quantizations available in the repo, for validation.
+        """Prompt for a custom quantization string, validating against ``available``.
 
         Returns:
             The chosen quantization tag (e.g. ``q4_k_m``) or None.
         """
-        import re
 
         while True:
             try:
@@ -727,8 +889,6 @@ class CLI:
         Returns:
             The lowercase quantization tag (e.g. ``q3_k_m``) or ``""``.
         """
-        import re
-
         base = os.path.basename(filename)
         # Strip a trailing ".gguf".
         if base.endswith(".gguf"):
@@ -748,17 +908,15 @@ class CLI:
     ) -> Optional[str]:
         """Pick the best quantization that fits VRAM-reserve model size.
 
-        The preferred quantization is resolved from ``best_hint`` (the quant
-        read from the downloaded GGUF filename) when available, falling back
-        to the model tags, and finally to a VRAM-based scan of the size table.
+        Resolves from ``best_hint`` (quant from the downloaded GGUF filename)
+        when available, then the model tags, then a VRAM-based scan of the
+        size table.
 
         Args:
             tags: Quantization tags from model info.
             vram_bytes: Total VRAM in bytes.
-            model_size_bytes: Exact on-disk bytes of the model (used to verify
-                the candidate fits within ``VRAM_RESERVE`` of VRAM).
-            best_hint: Optional quantization tag read from the GGUF filename
-                (e.g. ``q3_k_m``). When provided it seeds the candidate.
+            model_size_bytes: Exact on-disk bytes of the model.
+            best_hint: Optional quantization tag read from the GGUF filename.
 
         Returns:
             A quantization tag (e.g. ``q4_k_m``) or None.
@@ -820,14 +978,35 @@ class CLI:
             return q
         return None
 
+    def _timestamped_modelfile_name(self, model_name: Optional[str]) -> str:
+        """Build a filename-safe, timestamped modelfile name.
+
+        Format: ``<model_name>-<YYYYmmdd-HHMMSS>.modelfile``. Falls back to
+        a timestamp-only name when ``model_name`` is empty/None.
+
+        Args:
+            model_name: The Ollama model name used to make the file identifiable.
+
+        Returns:
+            A timestamped, filesystem-safe modelfile file name.
+        """
+
+        def sanitize(name):
+            if not name:
+                return ""
+            cleaned = re.sub(r"[^a-zA-Z0-9._-]", "_", name)
+            return cleaned[:60]
+
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        if model_name:
+            return f"{sanitize(model_name)}-{stamp}.modelfile"
+        return f"{stamp}.modelfile"
+
     def deploy(self, model_id: str, output: Optional[str] = None, **params) -> int:
         """Deploy a model to Ollama.
 
-        This command:
-        1. Fetches model information from Hugging Face
-        2. Generates a logical model name
-        3. Creates a Modelfile with default parameters
-        4. Adds the model to Ollama
+        Fetches model info, generates a logical model name, creates a Modelfile
+        with default parameters, and adds the model to Ollama.
 
         Args:
             model_id: The Hugging Face model identifier (or URL).
@@ -839,8 +1018,11 @@ class CLI:
         """
         # Extract the quantization requested in the URL (e.g. ...Q3_K_M.gguf).
         # Must be done BEFORE _parse_model_id normalizes the URL, which discards
-        # the GGUF filename and its quant tag.
+        # the GGUF filename and its quant tag. Do this alongside the filename
+        # stem (which we preserve verbatim to keep the original separator
+        # between the model name and the quant tag, e.g. i1-Q4_K_M).
         requested_quant = self._extract_quant_from_url(model_id)
+        original_filename = self._extract_gguf_filename_from_url(model_id)
         # Parse and normalize model ID (handles URLs)
         model_id = self._parse_model_id(model_id)
 
@@ -873,15 +1055,21 @@ class CLI:
         # Detect the quantization requested in the original URL (e.g.
         # Ornith-1.5-9B-uncensored.Q3_K_M.gguf -> q3_k_m). When a quant is
         # requested we download exactly that filename and do NOT re-pick the
-        # quant based on VRAM: the user asked for a specific file.
+        # quant based on VRAM: the user asked for a specific file. The original
+        # filename stem (captured above) is preserved verbatim so the separator
+        # between the model name and the quant tag is retained.
         requested_filename = self._requested_gguf_filename(
-            model_id, requested_quant, best
+            model_id, requested_quant, best, original_filename
         )
         # Download the GGUF file locally so the Modelfile FROM line
         # references a local path (ollama requires a local file, not a HF repo id).
+        # The GGUF filename is taken strictly from the user's URL request, with
+        # NO fallback to the base model file: if the exact GGUF file (e.g.
+        # ...Q4_K_M.gguf) does not exist, the model is "not found" rather than
+        # being deployed from a different file.
         self.console.print("[bold cyan]Downloading GGUF model file...[/bold cyan]")
         gguf_path = None
-        for attempt in [requested_filename, filename]:
+        for attempt in [requested_filename]:
             gguf_path = self.hf_client.download_gguf(model_id, attempt)
             if gguf_path:
                 # Extract the actual quant from the downloaded filename so VRAM
@@ -893,13 +1081,25 @@ class CLI:
                 break
         if not gguf_path:
             self.console.print("[red]Error: GGUF file not found on Hugging Face.[/red]")
-            print_error(f"Could not download a GGUF file from '{model_id}'.")
+            print_error(
+                f"GGUF file '{requested_filename}' not found for model '{model_id}'. "
+                "Try 'list' or 'search' to find available GGUF models."
+            )
             return 1
 
         # Exact model size from the downloaded file (for VRAM context calc).
-        import os
-
-        model_size_bytes = os.path.getsize(gguf_path)
+        # The GGUF disk size IS the model weight footprint in bytes - the
+        # honest value for the context (KV-cache) estimate. Using the raw disk
+        # size directly avoids the "divide-by-bytes-per-token" mistake that
+        # would otherwise treat the quant overhead as if it were parameters
+        # and drastically under-size the context for heavier quants
+        # (e.g. Q4_K_M ~5.24 GB disk, not the bogus ~0 GB from //5.63).
+        gguf_path_size = os.path.getsize(gguf_path)
+        # Guard against a pathological mismatch (e.g. a zero-length path) so we
+        # never fall back to a wildly wrong estimate.
+        model_size_bytes = gguf_path_size or int(
+            2.88 * (1024**3)  # IQ1_M footprint when size unknown
+        )
 
         # Best quant: prefer the real quant from the downloaded filename, then
         # fall back to a VRAM-based scan of the size table (tags alone are
@@ -943,7 +1143,22 @@ class CLI:
         context_length = params.get("context_length")
         if not context_length:
             # Compute from VRAM - model_size when VRAM is known, else default.
-            ctx = estimate_context(vram_bytes, model_size_bytes, tags)
+            # model_size_bytes is the GGUF-header parameter-count footprint
+            # (params * bytes/token), not the raw disk size, so the KV-cache
+            # estimate is honest. With no min_context the honest estimate
+            # (from VRAM - model_size, applying the config-specified Windows
+            # overhead) fills the device capacity with context and becomes
+            # num_ctx. The config-specified overhead is used (falling back to
+            # the documented default) rather than the hardcoded constant.
+            min_context = self.config.get_min_context(params.get("hardware"))
+            ctx = estimate_context(
+                vram_bytes,
+                model_size_bytes,
+                tags,
+                vram_windows_overhead=self.config.get_vram_windows_overhead(
+                    params.get("hardware")
+                ),
+            )
             if ctx is None:
                 context_length = 4096
             else:
@@ -960,11 +1175,23 @@ class CLI:
 
         # Report the chosen context length and VRAM-derived sizing.
         if vram_bytes and model_size_bytes:
+            vram_gb = vram_bytes // 1e9
+            model_gb = model_size_bytes // 1e9
+            overhead_str = (
+                f" (incl. {vram_windows_overhead/1e9:.1f}GB Windows overhead on Windows)"
+                if sys.platform.startswith("win")
+                else ""
+            )
             self.console.print(
                 "[bold yellow]Context length:[/bold yellow] "
                 f"{format_context(context_length)} tokens "
-                f"(from {vram_bytes//1e9:.1f}GB VRAM - {model_size_bytes//1e9:.2f}GB model)"
+                f"(from {vram_gb:.1f}GB VRAM - {model_gb:.2f}GB model{overhead_str})"
             )
+            if min_context is not None:
+                self.console.print(
+                    "[dim]Minimum context length:[/dim] "
+                    f"{format_context(min_context)} tokens (configured floor)"
+                )
 
         modelfile_content = self.modelfile_generator.generate(
             modelfile_from, context_length, params_dict
@@ -973,44 +1200,43 @@ class CLI:
         # Add to Ollama
         self.console.print("\n[bold cyan]Adding model to Ollama...[/bold cyan]")
         try:
-            import subprocess
-            import tempfile
-
             # Check if Ollama is running
             self._check_ollama()
 
             # Write the Modelfile to a dedicated folder (ollama requires a file
             # path, not stdin: `ollama create --file -` returns "no Modelfile found").
-            # The temp Modelfile is created in a project-local folder that is
-            # gitignored so it never shows up in version control.
-            import subprocess
-
+            # The working Modelfile is created in a project-local folder that is
+            # gitignored so it never shows up in version control. The file name
+            # is timestamped and identifies the run via the target model name
+            # (e.g. ``<model>-<YYYYmmdd-HHMMSS>.modelfile``) for transparency in
+            # logs. It remains a transient working file and is always removed
+            # below, never kept as a persistent artifact.
             modelfile_path = None
-            try:
-                os.makedirs(OLLAMA_CREATE_DIR, exist_ok=True)
-                fd, modelfile_path = tempfile.mkstemp(
-                    dir=OLLAMA_CREATE_DIR, suffix=".modelfile"
-                )
-                with open(modelfile_path, "w", encoding="utf-8") as tmp:
-                    tmp.write(modelfile_content)
+            os.makedirs(OLLAMA_CREATE_DIR, exist_ok=True)
+            modelfile_path = os.path.join(
+                OLLAMA_CREATE_DIR,
+                self._timestamped_modelfile_name(model_name),
+            )
+            with open(modelfile_path, "w", encoding="utf-8") as tmp:
+                tmp.write(modelfile_content)
 
-                # Create the model from the local Modelfile.
-                # When the Modelfile FROM line points to a local GGUF file,
-                # `ollama create` loads the model directly into the library.
-                # `ollama pull` is NOT used: it only fetches from a remote
-                # registry, and our Modelfile already references a downloaded
-                # GGUF file on disk.
-                result = subprocess.run(
-                    ["ollama", "create", model_name, "--file", modelfile_path],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                )
+            # Create the model from the local Modelfile.
+            # When the Modelfile FROM line points to a local GGUF file,
+            # `ollama create` loads the model directly into the library.
+            # `ollama pull` is NOT used: it only fetches from a remote
+            # registry, and our Modelfile already references a downloaded
+            # GGUF file on disk.
+            result = subprocess.run(
+                ["ollama", "create", model_name, "--file", modelfile_path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
 
-                if result.returncode != 0:
-                    self.console.print("[red]Error creating model in Ollama:[/red]")
-                    self.console.print(result.stderr)
-                    return 1
+            if result.returncode != 0:
+                self.console.print("[red]Error creating model in Ollama:[/red]")
+                self.console.print(result.stderr)
+                return 1
 
                 # Show success message
                 self.console.print(
@@ -1018,25 +1244,18 @@ class CLI:
                 )
                 self.console.print(f"   Model name: {model_name}")
                 self.console.print(f"   Context length: {context_length} tokens")
+                self.console.print("\n[bold]Update the model with:[/bold]")
+                self.console.print(
+                    f"   ollama create {model_name} --file {modelfile_path}"
+                )
                 self.console.print("\n[bold]Run the model with:[/bold]")
                 self.console.print(f"   ollama run {model_name}")
 
                 # Optionally save modelfile to file
                 if output:
-                    success = self.modelfile_generator.save(modelfile_content, output)
-                    if success:
-                        self.console.print(
-                            f"\n[bold green]Modelfile saved to: {output}[/bold green]"
-                        )
+                    self._save_output(modelfile_content, output, "Modelfile")
 
                 return 0
-            finally:
-                # Always clean up the temp Modelfile
-                if modelfile_path and os.path.exists(modelfile_path):
-                    try:
-                        os.remove(modelfile_path)
-                    except OSError:
-                        pass
 
         except FileNotFoundError:
             self.console.print(
@@ -1048,17 +1267,38 @@ class CLI:
             self.console.print("[red]Error deploying model:[/red] {}/".format(e))
             return 1
         finally:
-            # Always clean up the temp Modelfile
+            # Always clean up the transient working Modelfile.
             if modelfile_path and os.path.exists(modelfile_path):
                 try:
-                    os.remove(modelfile_path)
+                    # os.remove(modelfile_path)
+                    pass  # Skip removing the temp Modelfile
                 except OSError:
                     pass
 
+    def _save_output(self, content: str, output: Optional[str], label: str) -> None:
+        """Save generated content to ``output`` and print a confirmation.
+
+        Shared by create/convert/deploy so the transient Modelfile save is
+        identical across commands.
+
+        Args:
+            content: The generated content to save.
+            output: The output file path (must be non-empty).
+            label: A human-readable label for the saved artifact.
+
+        Returns:
+            True if the content was saved successfully.
+        """
+        if not output:
+            return False
+        if self.modelfile_generator.save(content, output):
+            self.console.print(f"\n[bold green]{label} saved to: {output}[/bold green]")
+            return True
+        print_error("Failed to save " + label)
+        return False
+
     def _check_ollama(self) -> None:
         """Check if Ollama is running."""
-        import subprocess
-
         try:
             result = subprocess.run(
                 ["ollama", "ps"],
@@ -1114,8 +1354,6 @@ class CLI:
         # Clean up the name for Ollama (replace special characters)
         # Drop the repo convention marker "-GGUF" (ollama accepts a plain GGUF
         # model id anyway).
-        import re
-
         base_name = re.sub(r"-GGUF$", "", base_name)
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "_", base_name)[:35]
 
@@ -1214,15 +1452,7 @@ class CLI:
 
         # Save to file
         if output:
-            success = self.modelfile_generator.save(ollama_def, output)
-            if not success:
-                print_error("Failed to save Ollama model definition")
-                return 1
-
-            self.console.print(
-                "[bold green]Ollama model definition generated successfully![/bold green]"
-            )
-            self.console.print(f"   Saved to: {output}")
+            self._save_output(ollama_def, output, "Ollama model definition")
         else:
             # Display in terminal
             self.console.print("\n[bold]Ollama model definition:[/bold]")

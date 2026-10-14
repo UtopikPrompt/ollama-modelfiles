@@ -38,10 +38,18 @@ def _coerce_int(value: Any) -> int:
     Returns:
         The integer value, or ``0`` if conversion fails.
     """
-    try:
-        return int(value)
-    except (TypeError, ValueError):
+    if value is None:
         return 0
+    # Human-friendly VRAM strings such as "10GB" must not be treated as a
+    # parse failure: they are already in GB (factor 1024**3) is applied by
+    # get_vram. Only genuinely non-numeric values fall back to 0.
+    text = str(value).strip()
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        # "10GB" -> keep the numeric prefix; "10GB" -> 10.
+        digits = "".join(ch for ch in text if ch.isdigit())
+        return int(digits) if digits else 0
 
 
 @dataclass
@@ -62,10 +70,20 @@ class HardwareProfile:
             auto-detect the optimal thread count.
         gpu_layers: Value for ``PARAMETER num_gpu``. ``-1`` lets Ollama
             auto-detect; ``0`` forces CPU execution.
-        vram: Total VRAM of the primary GPU in bytes. Used to estimate the
-            context window (``num_predict``) by subtracting the model size.
+        vram: VRAM capacity in human-friendly units (``GB`` by
+            default; ``MB`` or raw ``bytes`` via :attr:`vram_unit`).
+            Converted to bytes for context estimation.
             ``None`` disables VRAM-based context estimation.
+        vram_unit: Unit for :attr:`vram`. ``GB`` (default), ``MB``, or
+            ``bytes``.
+        min_context: Minimum context window (``num_predict``) enforced even if
+            the VRAM-based estimate is smaller. ``None`` (default) leaves the
+            estimate unbounded from below.
         description: Human-readable description shown by ``config``.
+        vram_windows_overhead: Windows VRAM overhead (GB) subtracted from the
+            reported device capacity before context estimation. Defaults to
+            the documented ~1.5 GB Windows footprint when not specified in
+            config.yml.
     """
 
     name: str
@@ -73,7 +91,10 @@ class HardwareProfile:
     num_threads: int
     gpu_layers: int = -1
     vram: Optional[int] = None
+    vram_unit: str = "GB"
+    min_context: Optional[int] = None
     description: str = ""
+    vram_windows_overhead: float = 1.5
 
 
 @dataclass
@@ -109,12 +130,45 @@ class Config:
         return self.get_hardware(override).gpu_layers
 
     def get_vram(self, override: Optional[str] = None) -> Optional[int]:
-        """Return the VRAM (in bytes) of the resolved hardware profile.
+        """Return the VRAM in bytes of the resolved hardware profile.
+
+        The profile stores a human-friendly value (``GB`` by default, or
+        ``MB``/``bytes``); this converts it to bytes for downstream
+        context estimation.
 
         Returns:
             The VRAM in bytes, or ``None`` if the profile does not define one.
         """
-        return self.get_hardware(override).vram
+        profile = self.get_hardware(override)
+        if profile.vram is None:
+            return None
+        unit = profile.vram_unit
+        if unit == "GB":
+            factor = 1024**3
+        elif unit == "MB":
+            factor = 1024**2
+        else:
+            factor = 1
+        return int(profile.vram * factor)
+
+    def get_min_context(self, override: Optional[str] = None) -> Optional[int]:
+        """Return the minimum context length of the resolved hardware profile.
+
+        Returns:
+            The minimum ``num_ctx`` (in tokens), or ``None`` if the profile does
+            not define one. When ``None``, :func:`estimate_context` applies its
+            natural calculation with no lower bound.
+        """
+        return self.get_hardware(override).min_context
+
+    def get_vram_windows_overhead(self, override: Optional[str] = None) -> float:
+        """Return the Windows VRAM overhead (in GB) of the resolved hardware
+        profile. Used to subtract the WDDM driver + desktop-compositor
+        footprint from the reported device capacity before context
+        estimation. Defaults to the documented ~1.5 GB when the profile
+        does not define one.
+        """
+        return self.get_hardware(override).vram_windows_overhead
 
     def get_ollama_url(self, override: Optional[str] = None) -> str:
         """Return the Ollama URL, or ``override`` when provided."""
@@ -169,6 +223,9 @@ def load_config(path: Optional[str] = None) -> Config:
             devices=[str(d) for d in devices],
             num_threads=_coerce_int(value.get("num_threads", 0)),
             gpu_layers=_coerce_int(value.get("gpu_layers", -1)),
+            vram=_coerce_int(value.get("vram", None)),
+            vram_unit=value.get("vram_unit", "GB"),
+            min_context=_coerce_int(value.get("min_context", None)),
             description=value.get("description", ""),
         )
 
@@ -198,4 +255,5 @@ def print_config(config: Config) -> None:
             f"  — devices: {', '.join(profile.devices)}"
             f"  — threads: {profile.num_threads}"
             f"  — gpu_layers: {profile.gpu_layers}"
+            f"  — min_context: {profile.min_context if profile.min_context is not None else 'n/a'}"
         )

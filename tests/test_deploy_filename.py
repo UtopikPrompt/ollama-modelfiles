@@ -91,6 +91,24 @@ def test_extract_quant_from_url_tree_url(cli):
     assert cli._extract_quant_from_url(url) == "Q5_K_M"
 
 
+def test_extract_quant_from_url_ignores_model_suffix(cli):
+    """A model-name suffix such as ``i1`` in ``...OBLITERATED-i1`` must NOT be
+    treated as an explicit quant: the deployer should still prompt for a
+    quant (returns None) rather than trying to download a non-existent file.
+    """
+    url = "https://huggingface.co/mradermacher/Cyber-Ornith-1.5-9B-OBLITERATED-i1-GGUF/resolve/main/Cyber-Ornith-1.5-9B-OBLITERATED-i1.gguf"
+    assert cli._extract_quant_from_url(url) is None
+
+
+def test_extract_quant_from_url_real_quant_still_works(cli):
+    """A genuine quant tag (e.g. ``Q3_K_M``) is preserved."""
+    url = (
+        "https://huggingface.co/mradermacher/ornith-GGUF"
+        "/resolve/main/ornith.Q3_K_M.gguf"
+    )
+    assert cli._extract_quant_from_url(url) == "Q3_K_M"
+
+
 def test_extract_quant_from_url_lowercased(cli):
     """All-lowercase quants (e.g. ``q4_k_m``) are returned as-is."""
     url = (
@@ -106,12 +124,83 @@ def test_extract_quant_from_url_no_quant(cli):
     assert cli._extract_quant_from_url(url) is None
 
 
-def test_requested_gguf_filename_preserves_case(cli):
-    """A case-preserved quant from the URL must produce the exact HF filename
-    ``{base}.{quant}.gguf`` (e.g. ``ornith.Q3_K_L.gguf``), not a lowercased one.
+def test_requested_gguf_filename_preserves_dash_separator(cli):
+    """When the URL provides the exact stem, the original separator between the
+    model name and the quant tag is preserved verbatim (a dash in
+    ``i1-Q4_K_M``), not rebuilt with a dot. This is the fix for the 404 where
+    ``...i1.Q4_K_M.gguf`` was requested instead of ``...i1-Q4_K_M.gguf``.
     """
-    filename = cli._requested_gguf_filename("mradermacher/ornith-GGUF", "Q3_K_L")
+    filename = cli._requested_gguf_filename(
+        "Cyber-Ornith-1.5-9B-OBLITERATED-i1-GGUF",
+        "Q4_K_M",
+        None,
+        "Cyber-Ornith-1.5-9B-OBLITERATED-i1-Q4_K_M",
+    )
+    assert filename == "Cyber-Ornith-1.5-9B-OBLITERATED-i1-Q4_K_M.gguf"
+
+
+def test_requested_gguf_filename_preserves_dot_separator(cli):
+    """A stem whose model name and quant are dot-separated (e.g. ``base.quant``)
+    is also preserved verbatim when provided by the URL.
+    """
+    filename = cli._requested_gguf_filename(
+        "mradermacher/ornith-GGUF",
+        "Q3_K_L",
+        None,
+        "ornith.Q3_K_L",
+    )
     assert filename == "ornith.Q3_K_L.gguf"
+
+
+def test_requested_gguf_filename_no_original_falls_back_to_dot(cli):
+    """Without an original stem, the filename is reconstructed as
+    ``{base}.{quant}.gguf`` (dot separator) for backward compatibility.
+    """
+    filename = cli._requested_gguf_filename(
+        "mradermacher/ornith-GGUF",
+        "Q3_K_L",
+        None,
+        None,
+    )
+    assert filename == "ornith.Q3_K_L.gguf"
+
+
+def test_requested_gguf_filename_no_quant_ignores_original(cli):
+    """When no quant is requested, the original stem is ignored and the
+    derived filename (which lists repo files) is used instead.
+    """
+    filename = cli._requested_gguf_filename(
+        "mradermacher/ornith-GGUF",
+        None,
+        None,
+        "ornith.Q3_K_L",
+    )
+    assert filename == "ornith.gguf"
+
+
+def test_extract_gguf_filename_from_url_full_stem(cli):
+    """The full GGUF filename stem (without .gguf) is extracted from the URL,
+    preserving case and the dash separator between model name and quant.
+    """
+    url = (
+        "https://huggingface.co/mradermacher/Cyber-Ornith-1.5-9B-OBLITERATED-i1-GGUF/"
+        "resolve/main/Cyber-Ornith-1.5-9B-OBLITERATED-i1-Q4_K_M.gguf?download=true"
+    )
+    assert (
+        cli._extract_gguf_filename_from_url(url)
+        == "Cyber-Ornith-1.5-9B-OBLITERATED-i1-Q4_K_M"
+    )
+
+
+def test_extract_gguf_filename_from_url_simple(cli):
+    """A simple stem (no quant) is extracted verbatim."""
+    url = "https://huggingface.co/mradermacher/ornith/resolve/main/ornith.gguf"
+    assert cli._extract_gguf_filename_from_url(url) == "ornith"
+
+
+def test_extract_gguf_filename_from_url_none(cli):
+    """A URL without a GGUF filename returns None."""
+    assert cli._extract_gguf_filename_from_url("mradermacher/ornith-GGUF") is None
 
 
 def test_requested_gguf_filename_case_is_not_lowercased(cli):
@@ -122,3 +211,22 @@ def test_requested_gguf_filename_case_is_not_lowercased(cli):
         "mradermacher/Ornith-1.5-9B-uncensored-GGUF", "Q3_K_L"
     )
     assert filename == "Ornith-1.5-9B-uncensored.Q3_K_L.gguf"
+
+
+def test_extract_quant_from_url_q4_k_m_in_version_dotted_name(cli):
+    # Regression: the version dot (1.5) must not be mistaken for the quant.
+    # Q4_K_M appears in the last stem component -> recognized quant.
+    url = (
+        "https://huggingface.co/Cyber-Ornith-1.5-9B-OBLITERATED/"
+        "resolve/main/Cyber-Ornith-1.5-9B-OBLITERATED.i1-Q4_K_M.gguf"
+    )
+    assert cli._extract_quant_from_url(url) == "Q4_K_M"
+
+
+def test_extract_quant_from_url_model_suffix_only_is_not_quant(cli):
+    # A non-quant component (e.g. "i1") is not a quant tag -> None.
+    url = (
+        "https://huggingface.co/Cyber-Ornith-1.5-9B-OBLITERATED/"
+        "resolve/main/Cyber-Ornith-1.5-9B-OBLITERATED.i1.gguf"
+    )
+    assert cli._extract_quant_from_url(url) is None

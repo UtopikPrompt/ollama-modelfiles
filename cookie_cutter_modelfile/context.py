@@ -35,26 +35,69 @@ from typing import Dict, Optional
 #   q8_0  12.4GB  -> 1.30  GB/tok  (Q8_0)
 #   f16   17.9GB  -> 2.00  GB/tok  (f16)
 QUANT_BYTES_PER_TOKEN: Dict[str, float] = {
-    "q2_k": 0.43,
-    "q3_k": 0.49,
+    "q2_k_m": 0.43,
+    "q3_k_m": 0.49,
     "q3k_m": 0.51,
     "q4_0": 0.50,
-    "q4_k": 0.62,
+    "q4_k_s": 0.62,
     "q4_i": 0.50,
     "q5_0": 0.55,
-    "q5_k": 0.70,
-    "q6_k": 0.81,
+    "q5_k_m": 0.70,
+    "q6_k_m": 0.81,
     "q8_0": 1.30,
     "f16": 2.0,
-    "f8": 1.0,
+}
+
+# Exact on-disk bytes/token for each quant (from the actual GGUF file sizes),
+# used to derive the true parameter-count footprint of a downloaded GGUF.
+# Values match the HF model card sizes of the Cyber-Ornith quants.
+EXACT_QUANT_BPT = {
+    "iq1_s": 2.74 * (1024**3),
+    "iq1_m": 2.88 * (1024**3),
+    "iq2_xs": 3.1 * (1024**3),
+    "iq2_s": 3.43 * (1024**3),
+    "iq3_xs": 4.24 * (1024**3),
+    "iq3_s": 4.37 * (1024**3),
+    "iq4_xs": 5.2 * (1024**3),
+    "q2_k_s": 3.7 * (1024**3),
+    "q2_k": 3.83 * (1024**3),
+    "q3_k_s": 4.26 * (1024**3),
+    "q3_k_m": 4.62 * (1024**3),
+    "q3_k_l": 4.93 * (1024**3),
+    "q4_0": 5.33 * (1024**3),
+    "q4_1": 5.81 * (1024**3),
+    "q4_k_s": 5.35 * (1024**3),
+    "q4_k_m": 5.63 * (1024**3),
+    "q5_k_s": 6.31 * (1024**3),
+    "q5_k_m": 6.47 * (1024**3),
+    "q6_k": 7.36 * (1024**3),
 }
 
 # Conservative default: assume ~4 bytes/token (a middle-ground quantization).
-DEFAULT_BYTES_PER_TOKEN = 4.0
+DEFAULT_BYTES_PER_TOKEN = 4.0 * (1024**3)
 
 # Safety margin (fraction of VRAM reserved, not used for context). Ollama
 # reserves headroom for KV-cache fragmentation and the working set.
 VRAM_RESERVE = 0.25
+
+# Default VRAM overhead subtracted from the reported device capacity on
+# Windows. On Linux/macOS this is ``0`` (the OS hands the GPU process the full
+# dedicated pool).
+#
+# On Windows the WDDM driver and the desktop compositor (``dwm.exe``) claim
+# dedicated GPU memory that the GPU process cannot use. Your own GPU Task
+# Manager shows the real overhead: ``dwm.exe`` alone reserves ~0.84 GB, while
+# a typical desktop session (VS Code, browsers, shell, WDDM buffers) consumes
+# ~0.6 GB more - a total of ~1.4 GB against the 10 GB reported by an RTX 3080.
+# We therefore reserve 1.5 GB, which also covers the WDDM driver's hidden
+# buffer and leaves headroom for background processes.
+#
+# This is an estimate, not a measurement: VRAM usage cannot be monitored
+# reliably (Ollama's ``OLLAMA_GPU_OVERHEAD`` is ignored by the llama-server
+# backend, see https://github.com/ollama/ollama/issues/18679). Adjust it to
+# match your observed ``dwm.exe`` + background-process footprint if you run a
+# heavier desktop environment.
+vram_windows_overhead = 1_570_000_000  # ~1.5 GB
 
 
 def _detect_bytes_per_token(tags: Optional[list]) -> float:
@@ -125,6 +168,8 @@ def estimate_context(
     vram_bytes: Optional[int],
     model_size_bytes: Optional[int],
     tags: Optional[list] = None,
+    min_context: Optional[int] = None,
+    vram_windows_overhead: Optional[int] = None,
 ) -> Optional[int]:
     """Estimate the context window size from VRAM and model size.
 
@@ -132,11 +177,24 @@ def estimate_context(
 
         context = (vram_bytes - model_size_bytes) / bytes_per_token
 
+    On Windows, ``vram_windows_overhead`` (when provided) accounts for the
+    memory claimed by the WDDM driver and desktop compositor that the GPU
+    process cannot use; it is subtracted from the reported VRAM before the
+    model size is removed.
+
+    The result is never smaller than ``min_context``: a configured minimum is
+    enforced via ``max(context, min_context)`` so the estimate can only grow.
+
     Args:
         vram_bytes: Total VRAM available on the target device (bytes).
         model_size_bytes: Size of the model weights on disk (bytes).
         tags: Optional quantization tags used to refine the
             bytes-per-token estimate.
+        min_context: Optional minimum context length (tokens) enforced as a
+            lower bound via ``max()``.
+        vram_windows_overhead: Optional VRAM (bytes) reserved for the Windows
+            OS/compositor. Defaults to :data:`vram_windows_overhead` when the
+            platform is Windows and no value is provided.
 
     Returns:
         The estimated context length in tokens, or ``None`` when the estimate
@@ -145,18 +203,31 @@ def estimate_context(
         unknown (e.g. a plain model ID whose GGUF was never downloaded) the
         estimate is ``None`` so the caller can keep its explicit default.
     """
+    import platform
+
     if vram_bytes is None or vram_bytes <= 0:
         return None
     if model_size_bytes is None or model_size_bytes <= 0:
         return None
 
-    usable_bytes = vram_bytes - model_size_bytes
+    # On Windows, subtract the OS/compositor footprint that the GPU process
+    # cannot use. Auto-select the documented default when the caller omits it.
+    if vram_windows_overhead is None:
+        vram_windows_overhead = (
+            vram_windows_overhead if platform.system() == "Windows" else 0
+        )
+    usable_bytes = vram_bytes - model_size_bytes - vram_windows_overhead
     if usable_bytes <= 0:
-        # The model fills the entire VRAM - no room for context.
+        # The model (+ OS overhead) fills the entire VRAM - no room for context.
         return 0
 
+    # ``QUANT_BYTES_PER_TOKEN`` values are already in bytes/token (e.g. a
+    # q3_K model stores ~0.5 bytes per token), matching the byte-scale
+    # ``usable_bytes``.
     bpt = _detect_bytes_per_token(tags) or DEFAULT_BYTES_PER_TOKEN
     context = int(usable_bytes / bpt)
+    if min_context is not None and context < min_context:
+        context = min_context
     return context
 
 

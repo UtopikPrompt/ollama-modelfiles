@@ -22,4 +22,7 @@ hardware:
       devices: ["GPU:0"]
       num_threads: 0 # 0 = auto-detect optimal thread count
       gpu_layers: -1 # -1 = auto-detect layers to run on GPU
-      vram: 10564246528 # ~10GB in bytes
+      vram: 10GB
+      # Windows VRAM overhead (GB) subtracted from the reported device
+      # capacity before context estimation.
+      vram_windows_overhead: 1.5GB

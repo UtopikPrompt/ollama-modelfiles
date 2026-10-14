@@ -366,6 +366,43 @@ cookie-cutter-modelfile create \
 The default profile can also be changed in the configuration file
 (`hardware.default`), or overridden per-command with `--hardware`.
 
+### VRAM-based context estimation
+
+When a hardware profile defines `vram`, the tool estimates the `num_predict`
+(context length) from the VRAM available. The calculation subtracts the model
+size and a reserve, then divides by the estimated bytes-per-token:
+
+```
+context = (vram_bytes - model_size_bytes - windows_overhead) / bytes_per_token
+```
+
+On **Windows**, `vram_windows_overhead` (default ~1.5 GB) accounts for the memory
+claimed by the WDDM driver and desktop compositor that the GPU process cannot use.
+This is subtracted from the reported VRAM before the model size is removed.
+
+#### `min_context`
+
+Set a **minimum context length** in a hardware profile to enforce a lower bound
+on `num_predict`, even when the VRAM-based estimate is smaller:
+
+```yaml
+hardware:
+  profiles:
+    rtx-3080:
+      devices: ["GPU:0"]
+      num_threads: 0
+      gpu_layers: -1
+      vram: 10564246528      # ~10GB in bytes
+      min_context: 65536     # enforce at least 64K context
+```
+
+When the VRAM-based estimate is *smaller* than `min_context`, the value is raised
+to `min_context`. When the estimate is *larger*, the larger value is kept — so a
+small model with lots of leftover VRAM still gets a generous context window.
+
+If a profile does not set `min_context`, the estimate is unbounded from below and
+falls back to `4096` when VRAM is unknown.
+
 ---
 
 ## Advanced Features

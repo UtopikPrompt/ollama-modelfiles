@@ -9,6 +9,8 @@ Complete API documentation for the cookie cutter modelfile tool.
 3. [Template API](#template-api)
 4. [Hugging Face API](#hugging-face-api)
 5. [Data Models](#data-models)
+6. [Configuration Models](#configuration-models)
+7. [Context Estimation](#context-estimation)
 
 ---
 
@@ -440,6 +442,86 @@ except ConversionError as e:
 ```
 
 ---
+
+## Configuration Models
+
+### `HardwareProfile`
+
+```python
+@dataclass
+class HardwareProfile:
+    """Hardware hardware profile for a deployment target."""
+    name: str
+    devices: List[str]
+    num_threads: int
+    gpu_layers: int = -1
+    vram: Optional[int] = None          # VRAM in bytes (int)
+    min_context: Optional[int] = None   # minimum num_predict (int)
+    description: str = ""
+```
+
+`HardwareProfile` is parsed by `load_config()` from `config.yml`. The `vram` field is stored in **bytes** and used to estimate `num_predict`. `min_context` enforces a lower bound on the estimated context length.
+
+### `HardwareProfile.get_min_context()`
+
+```python
+def get_min_context(self, override: Optional[str] = None) -> Optional[int]:
+    """Return the minimum context length for the given hardware override."""
+    return self.get_hardware(override).min_context
+```
+
+### `HardwareProfile.print_config()`
+
+```python
+def print_config(self) -> None:
+    """Print the hardware profile configuration to stdout."""
+```
+
+---
+
+## Context Estimation
+
+### `estimate_context()`
+
+```python
+from cookiecutter_modelfile.context import estimate_context
+
+ctx = estimate_context(
+    vram_bytes=10564246528,
+    model_size_bytes=2970000000,
+    tags=["quantization_type.Q4_K_M"],
+    min_context=65536,
+    vram_windows_overhead=vram_windows_overhead,
+)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `vram_bytes` | int | Total GPU VRAM in bytes. `None` disables estimation. |
+| `model_size_bytes` | int | GGUF model size in bytes. `None` disables estimation. |
+| `tags` | List[str] | Optional model tags (e.g. `quantization_type.Q4_K_M`). |
+| `min_context` | Optional[int] | Lower bound for the estimate. |
+| `vram_windows_overhead` | Optional[int] | VRAM consumed by the OS on Windows. Defaults to `platform.system()`. |
+
+**Return:** the estimated `num_predict` as an `int`, or `None` if VRAM/model size are missing or the usable VRAM is `<= 0`.
+
+**Behavior:**
+- `usable = vram_bytes - model_size_bytes - vram_windows_overhead`
+- `context = int(usable / QUANT_BYTES_PER_TOKEN)` (quantization lookup via `tags`)
+- If `min_context` is set and larger than the estimate, `context = min_context`
+- On Windows, `vram_windows_overhead` defaults to `vram_windows_overhead` (~1.5 GB)
+
+### Constants
+
+```python
+vram_windows_overhead = 1_570_000_000   # ~1.5GB Windows/WDDM overhead
+DEFAULT_BYTES_PER_TOKEN = 4.0
+VRAM_RESERVE = 0.25
+```
+
+---
+
+## Version History
 
 ## Configuration
 
