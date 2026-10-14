@@ -507,28 +507,7 @@ class CLI:
             # (``1.5``) and non-quant suffixes (``i1``, bare model names). The
             # original case of the matched tag is preserved (HF is
             # case-sensitive).
-            KNOWN_QUANT_TAGS = (
-                "f16",
-                "q2_k",
-                "q2_x",
-                "q3_k_s",
-                "q3_k_m",
-                "q3_k_l",
-                "q4_k_m",
-                "q4_k_s",
-                "q4_k_l",
-                "q4_0",
-                "q4_1",
-                "q5_k_m",
-                "q5_k_s",
-                "q5_k_l",
-                "q5_i",
-                "q6_k",
-                "q8_0",
-                "iq1",
-                "iq3",
-                "iq4_xs",
-            )
+            KNOWN_QUANT_TAGS = QUANT_TAGS
             lowered = last_component.lower()
             quant_component = None
             for tag in KNOWN_QUANT_TAGS:
@@ -722,20 +701,7 @@ class CLI:
             files = list_repo_files(model_id, repo_type="model")
         except Exception:
             return []
-        order = [
-            "f16",
-            "q8_0",
-            "q6_k",
-            "q5_k_m",
-            "q5_k_s",
-            "q4_k_m",
-            "q4_k_s",
-            "q3_k_l",
-            "q3_k_m",
-            "q3_k_s",
-            "iq4_xs",
-            "q2_k",
-        ]
+        order = QUANT_ORDER
         quants = []
         for f in files:
             if not f.endswith(".gguf"):
@@ -924,34 +890,8 @@ class CLI:
         if not vram_bytes or vram_bytes <= 0:
             return None
         # Preferred quantizations in order of increasing quality/size.
-        order = [
-            "f16",
-            "q8_0",
-            "q6_k",
-            "q5_k_m",
-            "q5_k_s",
-            "q4_k_m",
-            "q4_k_s",
-            "q3_k_l",
-            "q3_k_m",
-            "q3_k_s",
-            "iq4_xs",
-            "q2_k",
-        ]
-        size_guess = {
-            "f16": 17.9,
-            "q8_0": 9.5,
-            "q6_k": 7.4,
-            "q5_k_m": 6.5,
-            "q5_k_s": 6.3,
-            "q4_k_m": 5.6,
-            "q4_k_s": 5.4,
-            "q3_k_l": 4.9,
-            "q3_k_m": 4.6,
-            "q3_k_s": 4.3,
-            "iq4_xs": 5.2,
-            "q2_k": 3.8,
-        }
+        order = QUANT_ORDER
+        size_guess = QUANT_SIZE_GUESS
         usable = vram_bytes * (1 - VRAM_RESERVE)
 
         # Candidate resolution: hint (from filename) > tags > VRAM scan.
@@ -1237,7 +1177,7 @@ class CLI:
                 self.console.print("[red]Error creating model in Ollama:[/red]")
                 self.console.print(result.stderr)
                 return 1
-
+            else:
                 # Show success message
                 self.console.print(
                     "\n[bold green]✓ Model deployed successfully![/bold green]"
@@ -1262,9 +1202,6 @@ class CLI:
                 "[red]Error: Ollama is not installed or not in PATH.[/red]"
             )
             self.console.print("\nInstall Ollama from: https://ollama.com")
-            return 1
-        except subprocess.SubprocessError as e:
-            self.console.print("[red]Error deploying model:[/red] {}/".format(e))
             return 1
         finally:
             # Always clean up the transient working Modelfile.
